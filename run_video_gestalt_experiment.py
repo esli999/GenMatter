@@ -35,9 +35,9 @@ model_jimportance = jax.jit(HDGMM_model_3d.importance)
 
 # Configuration
 EXPERIMENT_NAME = "Video_Gestalt_Mask_Propagation"
-OUTPUT_DIR = "/home/esli/GenParticles_neural_stimulus/video_gestalt_masks"
-GESTALT_BASE_PATH = '/home/esli/GenParticles_neural_stimulus/assets/from_thomas'
-RAFT_FLOWS_PATH = '/home/esli/GenParticles_neural_stimulus/raft_flows'
+OUTPUT_DIR = "/home/esli/GenMatter/video_gestalt_masks"
+GESTALT_BASE_PATH = '/home/esli/GenMatter/assets/from_thomas'
+RAFT_FLOWS_PATH = '/home/esli/GenMatter/raft_flows'
 
 # Experiment parameters
 SCENES = [f'scene_{i:05d}' for i in range(20)]  # scene_00000 to scene_00019

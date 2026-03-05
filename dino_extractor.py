@@ -21,8 +21,8 @@ DAVIS_STIMULI = [
     "pigs", "scooter-black", "shooting", "soapbox"
 ]
 
-BASE_VIDEO_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_rgb_frames"
-OUTPUT_DIR = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_dino"
+BASE_VIDEO_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_rgb_frames"
+OUTPUT_DIR = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_dino"
 TARGET_H, TARGET_W = 520, 960
 PATCH_SIZE = 14
 N_COMPONENTS = 10

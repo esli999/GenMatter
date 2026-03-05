@@ -13,7 +13,7 @@ import jax
 from jax.random import key as jkey
 from scipy.ndimage import zoom
 
-sys.path.append('/home/esli/GenParticles_neural_stimulus')
+sys.path.append('/home/esli/GenMatter')
 
 from gestalt_experiment_algorithm import (
     load_gestalt_data,
@@ -352,7 +352,7 @@ def process_scene_texture(scene_name, texture_name, custom_hyperparams, trial_nu
 
     # STEP 9: Load ground truth and compute accuracy
     print("Computing accuracy...")
-    gt_path = f'/home/esli/GenParticles_neural_stimulus/assets/from_thomas/{scene_name}/render_passes/masks/Image0001.png'
+    gt_path = f'/home/esli/GenMatter/assets/from_thomas/{scene_name}/render_passes/masks/Image0001.png'
 
     try:
         gt_img = np.array(Image.open(gt_path))

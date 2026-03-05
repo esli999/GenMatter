@@ -41,9 +41,9 @@ TAPVID_VIDEO_NAMES = [
 
 VIDEO_NAMES = TAPVID_VIDEO_NAMES
 
-DAVIS_RGB_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_rgb_frames"
-DAVIS_SEGMASKS_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_segmasks"
-MOTION_DATA_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_npzs"
+DAVIS_RGB_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_rgb_frames"
+DAVIS_SEGMASKS_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_segmasks"
+MOTION_DATA_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_npzs"
 NUM_RANDOM_POINTS = 500
 RANDOM_SEED = 42
 OUTPUT_DIR = "/home/esli/GenParticles_NeurIPS/cotracker_baseline/cotracker_TAPVID_even_init"

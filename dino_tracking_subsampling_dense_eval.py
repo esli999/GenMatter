@@ -74,11 +74,11 @@ USE_SAM_FRAME0 = True
 # ]
 
 # Paths
-DAVIS_3D_MOTION_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_npzs"
-DAVIS_SEGMASKS_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_segmasks"
-DAVIS_RGB_PATH = "/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_rgb_frames"
-DINO_PATH_TEMPLATE = '/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_dino/{}_dino_pca_per_pixel.npz'
-SAM_FRAME0_PATH_TEMPLATE = '/home/esli/GenParticles_neural_stimulus/assets/tapvid_davis_30_videos_processed/tapvid_davis_SAM_frame0/{}_SAM_frame0.png'
+DAVIS_3D_MOTION_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_npzs"
+DAVIS_SEGMASKS_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_segmasks"
+DAVIS_RGB_PATH = "/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_rgb_frames"
+DINO_PATH_TEMPLATE = '/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_dino/{}_dino_pca_per_pixel.npz'
+SAM_FRAME0_PATH_TEMPLATE = '/home/esli/GenMatter/assets/tapvid_davis_30_videos_processed/tapvid_davis_SAM_frame0/{}_SAM_frame0.png'
 
 # Output directory
 EXPERIMENT_SAVE_DIR = "/home/esli/GenParticles_NeurIPS/final_cvpr_results/TAPVID_subsampling_dense_eval_SAM"

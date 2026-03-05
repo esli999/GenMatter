@@ -60,10 +60,10 @@ VIDEO_NAMES = [
 
 
 # Paths
-DAVIS_3D_MOTION_PATH = "/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/npzs"
-DAVIS_SEGMASKS_PATH = "/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/segmasks"
-DAVIS_RGB_PATH = "/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/frames"
-DINO_PATH_TEMPLATE = '/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/dino_features/dino_features_pca_l/{}_dino_pca_per_pixel.npz'
+DAVIS_3D_MOTION_PATH = "/home/esli/GenMatter/assets/cvpr_deformable_experiment/npzs"
+DAVIS_SEGMASKS_PATH = "/home/esli/GenMatter/assets/cvpr_deformable_experiment/segmasks"
+DAVIS_RGB_PATH = "/home/esli/GenMatter/assets/cvpr_deformable_experiment/frames"
+DINO_PATH_TEMPLATE = '/home/esli/GenMatter/assets/cvpr_deformable_experiment/dino_features/dino_features_pca_l/{}_dino_pca_per_pixel.npz'
 
 # Output directory
 EXPERIMENT_SAVE_DIR = "/home/esli/GenParticles_NeurIPS/dino_tracking_cvpr_experiment_joint"

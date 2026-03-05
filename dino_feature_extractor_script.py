@@ -39,7 +39,7 @@ DAVIS_STIMULI = [
     "wine_swirl"
 ]
 
-BASE_VIDEO_PATH = "/home/esli/GenParticles_neural_stimulus/assets/new_demo_vids"
+BASE_VIDEO_PATH = "/home/esli/GenMatter/assets/new_demo_vids"
 
 OUTPUT_DIR = "dino_features_pca_l"
 TARGET_H, TARGET_W = 520, 960 # These numbers are set by RAFT

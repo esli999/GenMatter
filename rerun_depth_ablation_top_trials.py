@@ -36,9 +36,9 @@ model_jsimulate = jax.jit(HDGMM_model_3d.simulate)
 model_jimportance = jax.jit(HDGMM_model_3d.importance)
 
 # Configuration
-OUTPUT_DIR = "/home/esli/GenParticles_neural_stimulus/depth_ablation_detailed_analysis"
-GESTALT_BASE_PATH = '/home/esli/GenParticles_neural_stimulus/assets/from_thomas'
-RAFT_FLOWS_PATH = '/home/esli/GenParticles_neural_stimulus/raft_flows'
+OUTPUT_DIR = "/home/esli/GenMatter/depth_ablation_detailed_analysis"
+GESTALT_BASE_PATH = '/home/esli/GenMatter/assets/from_thomas'
+RAFT_FLOWS_PATH = '/home/esli/GenMatter/raft_flows'
 
 # Top 5 trials most affected by depth ablation
 TOP_TRIALS = [

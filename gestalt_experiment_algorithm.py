@@ -37,8 +37,8 @@ SAVE_DATA = True
 # Gestalt scene and texture configurations
 GESTALT_SCENES = ['scene_00000', 'scene_00001']
 GESTALT_TEXTURES = ['texture_00', 'texture_07', 'texture_13', 'texture_16']
-GESTALT_BASE_PATH = '/home/esli/GenParticles_neural_stimulus/assets/from_thomas'
-RAFT_FLOWS_PATH = '/home/esli/GenParticles_neural_stimulus/raft_flows'
+GESTALT_BASE_PATH = '/home/esli/GenMatter/assets/from_thomas'
+RAFT_FLOWS_PATH = '/home/esli/GenMatter/raft_flows'
 
 ######################################################
 ## CONFIGURATION END

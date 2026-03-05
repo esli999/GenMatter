@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 
 # Configuration
-BASE_DIR = Path("/home/esli/GenParticles_neural_stimulus")
+BASE_DIR = Path("/home/esli/GenMatter")
 VIDEO_GESTALT_MASKS_DIR = BASE_DIR / "video_gestalt_masks"
 ASSETS_DIR = BASE_DIR / "assets" / "from_thomas"
 OUTPUT_DIR = BASE_DIR / "gestalt_inference_visualizations"

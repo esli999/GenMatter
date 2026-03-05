@@ -57,10 +57,10 @@ from dino_tracking import (
 
 VIDEO_NAME = "dog"
 
-DAVIS_3D_MOTION_PATH = "/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/npzs"
-DAVIS_SEGMASKS_PATH = "/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/segmasks"
-DAVIS_RGB_PATH = "/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/frames"
-DINO_PATH_TEMPLATE = '/home/esli/GenParticles_neural_stimulus/assets/cvpr_deformable_experiment/dino_features/dino_features_pca_l/{}_dino_pca_per_pixel.npz'
+DAVIS_3D_MOTION_PATH = "/home/esli/GenMatter/assets/cvpr_deformable_experiment/npzs"
+DAVIS_SEGMASKS_PATH = "/home/esli/GenMatter/assets/cvpr_deformable_experiment/segmasks"
+DAVIS_RGB_PATH = "/home/esli/GenMatter/assets/cvpr_deformable_experiment/frames"
+DINO_PATH_TEMPLATE = '/home/esli/GenMatter/assets/cvpr_deformable_experiment/dino_features/dino_features_pca_l/{}_dino_pca_per_pixel.npz'
 
 OUTPUT_DIR = "/home/esli/GenParticles_NeurIPS/dog_tracking_results"
 
