@@ -207,9 +207,15 @@ assets/
 *.jpeg
 *.gif
 *.json
-experiments/
-results/
 outputs/
+
+# Track experiment code and postprocessing, but ignore result data
+!experiments/
+!experiments/**/*.py
+!postprocessing/
+!postprocessing/**/*.py
+!results/
+results/*
 logs/
 checkpoints/
 wandb/
