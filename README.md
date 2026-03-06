@@ -1,42 +1,111 @@
-# GenParticles_NeurIPS
-Anonymized Supplementary Materials Submission for GenParticles (NeurIPS 2025)
+# GenMatter
 
-## Setup and Benchmark Instructions
+Probabilistic 3D particle tracking for motion segmentation. Code release for reproducing the Gestalt segmentation and TAP-Vid DAVIS tracking experiments.
 
-**Requirements:**
-- CUDA 12.4 must be installed on your system (with a compatible driver).
-- You need a single NVIDIA GPU with at least 24GB of Memory.
-- If a different CUDA version is installed, it must be compatible with JAX and GenJAX versions from `requirements.txt`
+## Requirements
 
-### 1. Create and Activate Conda Environment
+- CUDA 12.4+ with a compatible NVIDIA driver
+- Single NVIDIA GPU with at least 24 GB memory
+- Python 3.11
 
-```
+## Setup
+
+```bash
 conda create -n genparticles python=3.11
 conda activate genparticles
 pip install -r requirements.txt
 ```
 
-### 2. Extract Depth and Motion Estimates
+## Repository Structure
 
-Install VideoDepthAnything (https://github.com/DepthAnything/Video-Depth-Anything), and use davis_script.sh to preprocess all the depth files. run.py from VideoDepthAnything can be left unmodified. 
-
-Run preprocessing/motion_extraction_3d/davis_motion_extraction.py to get npz files containing 3D motion information for each of the davis videos. This script will use an implementation of RAFT on PyTorch Hub. 
-
-### 3. Run DAVIS Benchmark
 ```
-python davis_benchmark.py 
+GenMatter/
+  config.py                          # Central path configuration
+  run_experiments.py                 # CLI dispatcher
+
+  genparticles/                      # Core library (unchanged)
+
+  experiments/
+    gestalt/
+      algorithm.py                   # HDGMM algorithm for Gestalt
+      run_gestalt.py                 # Mask-propagation Gestalt experiment
+      run_gestalt_depth_ablation.py  # Depth ablation variant
+    davis/
+      dino_extractor.py              # DINO feature extraction for DAVIS
+      run_davis_tracking.py          # HDGMM tracking on DAVIS
+      run_davis_subsampling.py       # Subsampling evaluation
+      run_davis_ablation.py          # Hyperblob clustering ablation
+    baselines/
+      run_cotracker.py               # CoTracker3 baseline
+
+  postprocessing/
+    postprocess_gestalt.py           # Aggregate Gestalt metrics
+    postprocess_gestalt_ablation.py  # Baseline vs depth-ablation comparison
+    postprocess_davis.py             # Aggregate DAVIS metrics
+
+  preprocessing/                     # Depth/motion extraction (unchanged)
+  assets/                            # Data directory (gitignored)
+  raft_flows/                        # Precomputed optical flows (gitignored)
+  results/                           # Experiment outputs
 ```
 
-### 4. Run Psychophysics Benchmark
+## Configuration
+
+All paths are centralized in `config.py` using repo-relative defaults with environment variable overrides:
+
+| Variable | Default | Override env var |
+|---|---|---|
+| `ASSETS_DIR` | `<repo>/assets` | `GENMATTER_ASSETS_DIR` |
+| `RESULTS_DIR` | `<repo>/results` | `GENMATTER_RESULTS_DIR` |
+| `SEGANYMO_BASE_PATH` | `/home/esli/SegAnyMo/gestalt_SegAnyMo_outputs` | `SEGANYMO_BASE_PATH` |
+
+## Preprocessing
+
+### 1. Depth and Motion Estimates
+
+Install [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and use `davis_script.sh` to preprocess depth files. Then extract 3D motion:
+
+```bash
+python preprocessing/motion_extraction_3d/davis_motion_extraction.py
 ```
-python preprocessing/random_dot_kinematograms/RDK_extraction.py
-python psychophysics_benchmark.py
+
+### 2. DINO Feature Extraction
+
+```bash
+python run_experiments.py davis-extract-dino
 ```
 
-### 5. Run Baseline Comparisons 
+## Running Experiments
 
-SpaTracker: After installing SpaTracker (https://github.com/henry123-boy/SpaTracker), update baseline_experiments/run_spatracker_baseline.sh script and baseline_experiments/run_spatracker.py to point to the downloaded DAVIS assets folders. To run SpaTracker with our provided script, the individual frames of the video will have to be encoded into an MP4 file. baseline_experiments/calculate_spatracker_accuracy.py will calculate statistics for SpaTracker's accuracy performance. 
+Use the CLI dispatcher to run any experiment:
 
-CoTracker3: baseline_experiments/cotracker_accuracy.py is configured to download the offline model from PyTorch Hub, run it on the DAVIS videos, and calculate statistics. Update the assets folders and results folders to point to the folders on your machine. 
+```bash
+# Gestalt segmentation
+python run_experiments.py gestalt
+python run_experiments.py gestalt-depth-ablation
+
+# DAVIS tracking
+python run_experiments.py davis-tracking
+python run_experiments.py davis-subsampling
+python run_experiments.py davis-ablation
+
+# CoTracker baseline
+python run_experiments.py cotracker
+```
+
+## Postprocessing
+
+After experiments complete, aggregate metrics:
+
+```bash
+python run_experiments.py postprocess-gestalt
+python run_experiments.py postprocess-gestalt-ablation
+python run_experiments.py postprocess-davis
+```
+
+Outputs are written to `results/postprocessing/` as JSON and CSV files.
+
+## Baseline Comparisons
 
 
+**CoTracker3:** The `run_cotracker.py` experiment downloads the offline model from PyTorch Hub automatically.
