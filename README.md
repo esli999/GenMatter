@@ -31,14 +31,15 @@ All paths are set in **`config.py`** (overridable with env vars below).
 
 1. If **`GENMATTER_DAVIS_DIR`** is set → use that.
 2. Else if **`<repo>/assets`** exists as a **real** directory (not a symlink) → use it.
-3. Else → **`$GENMATTER_LEGACY_DATA_ROOT/assets`** (default: `/home/esli/GenMatter_neural_stimulus/assets`).
+3. Else if **`GENMATTER_LEGACY_DATA_ROOT`** is set and **`$GENMATTER_LEGACY_DATA_ROOT/assets`** exists → use that.
+4. Else → **`<repo>/assets`** (even if missing or a symlink).
 
 So DAVIS usually resolves to  
 `…/assets/tapvid_davis_30_videos_processed/` without symlinks in the repo.
 
 Gestalt does **not** use that tree; it only uses **`genmatter_data/assets/`**.
 
-**Populate defaults** (`run_experiments.py populate-data`): `--source` and `--raft-source` follow the same rule (real `<repo>/assets` and `<repo>/raft_flows`, else legacy root). Notebooks or scripts that pointed at old top-level symlinks (`assets`, `raft_flows`, `final_cvpr_results/…`) should use the real paths under your **`GENMATTER_LEGACY_DATA_ROOT`** or **`GenMatter_NeurIPS`** checkout instead.
+**Populate defaults** (`run_experiments.py populate-data`): `--source` and `--raft-source` follow the same rule (real `<repo>/assets` and `<repo>/raft_flows`, else **`GENMATTER_LEGACY_DATA_ROOT`** if set). Notebooks or scripts that pointed at old top-level symlinks (`assets`, `raft_flows`, `final_cvpr_results/…`) should use the real paths under your **`GENMATTER_LEGACY_DATA_ROOT`** or **`GenMatter_NeurIPS`** checkout instead.
 
 ### If you already had `genmatter_data/from_thomas/` (old layout)
 
@@ -58,7 +59,7 @@ uv run python run_experiments.py populate-data
 uv run python run_experiments.py populate-data --raft-only
 ```
 
-Source defaults: same resolution as `config.POPULATE_*` (real repo dirs, else `GENMATTER_LEGACY_DATA_ROOT`).  
+Source defaults: same resolution as `config.POPULATE_*` (real repo dirs, else `GENMATTER_LEGACY_DATA_ROOT` when set).  
 Override: `uv run python scripts/populate_genmatter_data.py --source /path --raft-source /path`
 
 ---
@@ -163,14 +164,14 @@ Outputs: `results/postprocessing/*.json`, `*.csv`, and psychophysics `*.png` whe
 |---------|------|
 | `GENMATTER_DATA_DIR` | Root for `assets/` subfolder (default `<repo>/genmatter_data`) |
 | `GENMATTER_DAVIS_DIR` | Parent of `tapvid_davis_30_videos_processed/` (overrides auto-resolve) |
-| `GENMATTER_LEGACY_DATA_ROOT` | Fallback when `<repo>/assets` or `<repo>/raft_flows` are missing or symlinks (default `…/GenMatter_neural_stimulus`) |
+| `GENMATTER_LEGACY_DATA_ROOT` | Optional fallback when `<repo>/assets` or `<repo>/raft_flows` are missing or symlinks (no default; set explicitly if needed) |
 | `GENMATTER_RAFT_SOURCE_DIR` | Full-length RAFT npz dir for `populate-data` (overrides auto-resolve) |
 | `GENMATTER_RAFT_FLOWS_PATH` | Trimmed RAFT output directory (default `genmatter_data/assets/raft_flows`) |
 | `GENMATTER_RAFT_NUM_FLOW_FRAMES` | Flow frames kept in trimmed RAFT (default `5`) |
 | `GENMATTER_RESULTS_DIR` | Where `results/` lives |
 | `GENMATTER_RDK_DIR` | Root for RDK psychophysics (`RDK_configs.json`, `config_*/data.npz`; default `<repo>/assets/RDK`) |
 | `GENMATTER_RDK_REPRO_KEYS_PATH` | Explicit path to `reproducibility_keys.json` (overrides default `<GENMATTER_RDK_DIR>/reproducibility_keys.json`) |
-| `SEGANYMO_BASE_PATH` | For `postprocess-gestalt` SegAnyMo masks |
+| `SEGANYMO_BASE_PATH` | For `postprocess-gestalt` SegAnyMo masks (optional; unset skips SegAnyMo paths) |
 
 ---
 

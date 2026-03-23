@@ -7,7 +7,8 @@ RDK psychophysics data lives under ``GENMATTER_RDK_DIR`` (default ``<repo>/asset
 Optional per-stimulus JAX seeds: ``GENMATTER_RDK_REPRO_KEYS_PATH`` or ``reproducibility_keys.json`` in that directory.
 
 **No symlinks required:** if ``<repo>/assets`` or ``<repo>/raft_flows`` are missing
-or are symlinks, defaults fall back to ``GENMATTER_LEGACY_DATA_ROOT`` (see below).
+or are symlinks, set ``GENMATTER_LEGACY_DATA_ROOT`` to a sibling checkout that contains
+those trees (there is no built-in default path).
 """
 
 import os
@@ -15,10 +16,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.resolve()
 
-# Sibling checkout with full ``assets/`` and ``raft_flows/`` (override per machine).
-LEGACY_DATA_ROOT = Path(
-    os.environ.get("GENMATTER_LEGACY_DATA_ROOT", "/home/esli/GenMatter_neural_stimulus")
-)
+
+def _legacy_data_root() -> Path | None:
+    """Optional sibling checkout with ``assets/`` and ``raft_flows/`` (``GENMATTER_LEGACY_DATA_ROOT``)."""
+    p = os.environ.get("GENMATTER_LEGACY_DATA_ROOT")
+    return Path(p).expanduser().resolve() if p else None
 
 
 def _resolve_assets_parent() -> Path:
@@ -26,10 +28,11 @@ def _resolve_assets_parent() -> Path:
     if os.environ.get("GENMATTER_DAVIS_DIR"):
         return Path(os.environ["GENMATTER_DAVIS_DIR"])
     local = REPO_ROOT / "assets"
-    legacy = LEGACY_DATA_ROOT / "assets"
+    legacy_root = _legacy_data_root()
+    legacy = legacy_root / "assets" if legacy_root is not None else None
     if local.is_dir() and not local.is_symlink():
         return local.resolve()
-    if legacy.is_dir():
+    if legacy is not None and legacy.is_dir():
         return legacy
     return local
 
@@ -39,10 +42,11 @@ def _resolve_full_raft_source_dir() -> Path:
     if os.environ.get("GENMATTER_RAFT_SOURCE_DIR"):
         return Path(os.environ["GENMATTER_RAFT_SOURCE_DIR"])
     local = REPO_ROOT / "raft_flows"
-    legacy = LEGACY_DATA_ROOT / "raft_flows"
+    legacy_root = _legacy_data_root()
+    legacy = legacy_root / "raft_flows" if legacy_root is not None else None
     if local.is_dir() and not local.is_symlink():
         return local.resolve()
-    if legacy.is_dir():
+    if legacy is not None and legacy.is_dir():
         return legacy
     return local
 
@@ -158,10 +162,11 @@ DAVIS_ABLATION_OUTPUT_DIR = RESULTS_DIR / "davis_ablation"
 COTRACKER_OUTPUT_DIR = RESULTS_DIR / "cotracker_baseline"
 POSTPROCESSING_OUTPUT_DIR = RESULTS_DIR / "postprocessing"
 
-SEGANYMO_BASE_PATH = Path(
-    os.environ.get(
-        "SEGANYMO_BASE_PATH",
-        "/home/esli/SegAnyMo/gestalt_SegAnyMo_outputs",
-    )
-)
+def _resolve_seganymo_base_path() -> Path | None:
+    """SegAnyMo mask root for ``postprocess-gestalt``; unset unless ``SEGANYMO_BASE_PATH`` is set."""
+    p = os.environ.get("SEGANYMO_BASE_PATH")
+    return Path(p).expanduser().resolve() if p else None
+
+
+SEGANYMO_BASE_PATH: Path | None = _resolve_seganymo_base_path()
 FLOWSAM_MASKS_SUBPATH = "masks/flowsam_matched_reprocessed"

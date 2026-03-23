@@ -55,6 +55,8 @@ def load_ground_truth_mask(scene: str, frame_idx: int) -> np.ndarray | None:
 
 def load_seganymo_mask(scene: str, texture: str, frame_idx: int) -> np.ndarray | None:
     """Load SegAnyMo mask (1000x1000)."""
+    if config.SEGANYMO_BASE_PATH is None:
+        return None
     mask_file = os.path.join(
         config.SEGANYMO_BASE_PATH,
         f"{scene}_{texture}",
@@ -359,12 +361,16 @@ def main() -> None:
     existing_combinations: list[tuple[str, str]] = []
     for scene in SCENES:
         for texture in TEXTURES:
-            seg_dir = os.path.join(
-                config.SEGANYMO_BASE_PATH,
-                f"{scene}_{texture}",
-                "sam2",
-                "initial_preds",
-                "output_six_frame",
+            seg_dir = (
+                os.path.join(
+                    config.SEGANYMO_BASE_PATH,
+                    f"{scene}_{texture}",
+                    "sam2",
+                    "initial_preds",
+                    "output_six_frame",
+                )
+                if config.SEGANYMO_BASE_PATH is not None
+                else None
             )
             flowsam_dir = os.path.join(
                 config.GESTALT_BASE_PATH,
@@ -378,7 +384,11 @@ def main() -> None:
                 os.path.exists(os.path.join(gm_dir, f"run_{i}"))
                 for i in range(NUM_RUNS)
             )
-            if os.path.exists(seg_dir) or os.path.exists(flowsam_dir) or has_gm:
+            if (
+                (seg_dir is not None and os.path.exists(seg_dir))
+                or os.path.exists(flowsam_dir)
+                or has_gm
+            ):
                 existing_combinations.append((scene, texture))
 
     print(f"Processing {len(existing_combinations)} combinations\n")

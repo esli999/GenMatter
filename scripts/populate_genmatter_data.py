@@ -2,7 +2,7 @@
 """
 Copy Gestalt inputs into ``genmatter_data/assets/`` from a source tree that has
 ``from_thomas/`` plus full-length RAFT ``*.npz`` (defaults: real ``<repo>/assets``
-and ``<repo>/raft_flows``, else ``GENMATTER_LEGACY_DATA_ROOT``; see ``config.py``).
+and ``<repo>/raft_flows``, else ``GENMATTER_LEGACY_DATA_ROOT`` when set; see ``config.py``).
 
 RAFT ``.npz`` files are written trimmed to ``GESTALT_RAFT_NUM_FLOW_FRAMES`` and
 compressed (see ``config.py``).
@@ -141,7 +141,7 @@ def main() -> None:
         default=config.POPULATE_GESTALT_SOURCE_DIR,
         help=(
             "Directory that contains ``from_thomas/`` "
-            "(default: real <repo>/assets, else GENMATTER_LEGACY_DATA_ROOT/assets; "
+            "(default: real <repo>/assets, else GENMATTER_LEGACY_DATA_ROOT/assets when set; "
             "see config.py)"
         ),
     )
@@ -151,7 +151,7 @@ def main() -> None:
         default=config.POPULATE_FULL_RAFT_SOURCE_DIR,
         help=(
             "Directory of full-length RAFT ``raft_flows_*.npz`` "
-            "(default: real <repo>/raft_flows, else GENMATTER_LEGACY_DATA_ROOT/raft_flows)"
+            "(default: real <repo>/raft_flows, else GENMATTER_LEGACY_DATA_ROOT/raft_flows when set)"
         ),
     )
     p.add_argument(
