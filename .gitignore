@@ -208,6 +208,8 @@ assets/
 *.gif
 *.json
 outputs/
+# json files for RDK psychophysics experiment + reproducibility keys
+!preprocessing/random_dot_kinematograms/canonical/*.json
 
 # Track experiment code and postprocessing, but ignore result data
 !experiments/
