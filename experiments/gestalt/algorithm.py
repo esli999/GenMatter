@@ -104,7 +104,9 @@ def load_gestalt_data(scene, texture):
         flow = flow_data['flow']
     else:
         flow = next(iter(flow_data.values()))
-    
+    n = config.GESTALT_RAFT_NUM_FLOW_FRAMES
+    flow = flow[:n]
+
     return depth, flow
 
 def compute_3d_points_and_motion(depth, flow, downsample_factor=8, min_motion_magnitude=0.05, focal_length_scale=1.0):

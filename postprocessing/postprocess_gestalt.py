@@ -23,16 +23,8 @@ import config  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 
-SCENES = [f"scene_{i:05d}" for i in range(20)]
-TEXTURES = [
-    "texture_00",
-    "texture_07",
-    "texture_13",
-    "texture_16",
-    "texture_21",
-    "texture_22",
-    "texture_25",
-]
+SCENES = list(config.GESTALT_SCENES)
+TEXTURES = list(config.GESTALT_TEXTURES)
 NUM_FRAMES = 5
 NUM_PROBES = 100
 RANDOM_SEED = 42

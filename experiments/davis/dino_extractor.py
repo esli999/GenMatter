@@ -17,15 +17,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 import config
 
 # %%
-# Configuration
-DAVIS_STIMULI = [
-    "judo", "bike-packing", "blackswan", "bmx-trees", "breakdance", "camel", "car-roundabout",
-    "car-shadow", "cows", "dance-twirl", "dog", "dogs-jump", "drift-chicane", "drift-straight",
-    "goat", "gold-fish", "horsejump-high", "india", "kite-surf", "lab-coat",
-    "libby", "loading", "mbike-trick", "motocross-jump", "paragliding-launch", "parkour",
-    "pigs", "scooter-black", "shooting", "soapbox"
-]
-
+# Configuration (30 TAP-Vid names: ``config.TAPVID_DAVIS_VIDEO_NAMES``)
 BASE_VIDEO_PATH = str(config.DAVIS_RGB_PATH)
 OUTPUT_DIR = str(config.DAVIS_DINO_PATH)
 TARGET_H, TARGET_W = 520, 960
@@ -248,15 +240,17 @@ def process_video(video_name, base_path, model, device, output_dir):
 
 # %%
 # Process all DAVIS stimuli videos
-print(f"Processing {len(DAVIS_STIMULI)} videos...")
+print(f"Processing {len(config.TAPVID_DAVIS_VIDEO_NAMES)} videos...")
 print(f"Output directory: {OUTPUT_DIR}\n")
 
 successful = 0
 failed = 0
 skipped = 0
 
-for i, video_name in enumerate(DAVIS_STIMULI, 1):
-    print(f"[{i}/{len(DAVIS_STIMULI)}] Processing {video_name}...")
+for i, video_name in enumerate(config.TAPVID_DAVIS_VIDEO_NAMES, 1):
+    print(
+        f"[{i}/{len(config.TAPVID_DAVIS_VIDEO_NAMES)}] Processing {video_name}..."
+    )
     
     result = process_video(video_name, BASE_VIDEO_PATH, dinov2_vits14, device, OUTPUT_DIR)
     
@@ -279,7 +273,7 @@ print(f"Summary:")
 print(f"  Successfully processed: {successful}")
 print(f"  Already existed: {skipped}")
 print(f"  Failed: {failed}")
-print(f"  Total: {len(DAVIS_STIMULI)}")
+print(f"  Total: {len(config.TAPVID_DAVIS_VIDEO_NAMES)}")
 print("=" * 60)
 
 # %%

@@ -24,38 +24,7 @@ import config  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 
-DAVIS_VIDEOS = [
-    "bike-packing",
-    "blackswan",
-    "bmx-trees",
-    "breakdance",
-    "camel",
-    "car-roundabout",
-    "car-shadow",
-    "cows",
-    "dance-twirl",
-    "dog",
-    "dogs-jump",
-    "drift-chicane",
-    "drift-straight",
-    "goat",
-    "gold-fish",
-    "horsejump-high",
-    "india",
-    "judo",
-    "kite-surf",
-    "lab-coat",
-    "libby",
-    "loading",
-    "mbike-trick",
-    "motocross-jump",
-    "paragliding-launch",
-    "parkour",
-    "pigs",
-    "scooter-black",
-    "shooting",
-    "soapbox",
-]
+DAVIS_VIDEOS = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
 SUBSAMPLE_DIRS: dict[str, float] = {
     "subsample_12_5": 12.5,

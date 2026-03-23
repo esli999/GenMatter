@@ -14,7 +14,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import config
 
@@ -48,8 +47,8 @@ GESTALT_BASE_PATH = str(config.GESTALT_BASE_PATH)
 RAFT_FLOWS_PATH = str(config.RAFT_FLOWS_PATH)
 
 # Experiment parameters
-SCENES = [f'scene_{i:05d}' for i in range(20)]  # scene_00000 to scene_00019
-TEXTURES = ['texture_00', 'texture_07', 'texture_13', 'texture_16', 'texture_21', 'texture_22', 'texture_25']
+SCENES = list(config.GESTALT_SCENES)
+TEXTURES = list(config.GESTALT_TEXTURES)
 NUM_RUNS = 1  # Number of independent runs per scene/texture
 RANDOM_SEED_BASE = 42  # Base seed, will use 42, 43, 44, 45, 46 for 5 runs
 FOCAL_LENGTH_SCALE = 2.0  # Scale focal length for better depth separation
@@ -311,10 +310,11 @@ def load_six_frame_gestalt_data(scene, texture):
         raise FileNotFoundError(f"Flow file not found: {flow_file}")
 
     flow_data = np.load(flow_file)
+    n = config.GESTALT_RAFT_NUM_FLOW_FRAMES
     if 'flow' in flow_data:
-        flow = flow_data['flow'][:5]  # First 5 frames
+        flow = flow_data['flow'][:n]
     else:
-        flow = next(iter(flow_data.values()))[:5]
+        flow = next(iter(flow_data.values()))[:n]
 
     # Return dummy depth (will be replaced in compute_3d_points_and_motion_2d_only)
     # We need this to have the right shape for the pipeline

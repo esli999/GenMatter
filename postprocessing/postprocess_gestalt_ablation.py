@@ -21,16 +21,8 @@ from scipy.ndimage import zoom
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config
 
-GESTALT_SCENES = [f"scene_{i:05d}" for i in range(20)]
-GESTALT_TEXTURES = [
-    "texture_00",
-    "texture_07",
-    "texture_13",
-    "texture_16",
-    "texture_21",
-    "texture_22",
-    "texture_25",
-]
+GESTALT_SCENES = list(config.GESTALT_SCENES)
+GESTALT_TEXTURES = list(config.GESTALT_TEXTURES)
 NUM_FRAMES = 6
 NUM_PROBES = 100
 RANDOM_SEED = 42

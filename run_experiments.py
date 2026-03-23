@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.resolve()
 
 COMMANDS = {
+    "populate-data": "scripts/populate_genmatter_data.py",
     "gestalt": "experiments/gestalt/run_gestalt.py",
     "gestalt-depth-ablation": "experiments/gestalt/run_gestalt_depth_ablation.py",
     "davis-extract-dino": "experiments/davis/dino_extractor.py",
@@ -28,7 +29,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Available commands:\n" + "\n".join(f"  {k}" for k in COMMANDS),
     )
-    parser.add_argument("command", choices=COMMANDS.keys(), help="Experiment or postprocessing step to run")
+    parser.add_argument(
+        "command",
+        choices=COMMANDS.keys(),
+        help="Experiment, data setup, or postprocessing step to run",
+    )
     parser.add_argument("extra", nargs=argparse.REMAINDER, help="Extra arguments forwarded to the script")
     args = parser.parse_args()
 
