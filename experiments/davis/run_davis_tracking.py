@@ -46,38 +46,10 @@ from genjax import Const, gen, Pytree
 # Configuration
 # ============================================================================
 
-# All videos to process
-# VIDEO_NAMES = [
-#     "jello_trim", "bear", "blackswan", "breakdance", "breakdance-flare", "camel", "cows",
-#     "dance-jump", "dance-twirl", "dog", "elephant", "flamingo", "goat",
-#     "hike", "lucia", "mallard-fly", "parkour", "rollerblade",
-#     "cloth_bag", "gray_jacket", "manta_ray",
-#     "new_eagle_trim", "ostrich_trim", "whiskey_swirl_2",
-#     "wine_swirl", "purple_jacket", "snake_trim"
-# ]
-
-# 30 TAP-Vid video names (total: 30)
-TAPVID_VIDEO_NAMES = [
-    "blackswan", "bike-packing", "bmx-trees", "breakdance", "camel", "car-roundabout",
-    "car-shadow", "cows", "dance-twirl", "dog", "dogs-jump", "drift-chicane", "drift-straight",
-    "goat", "gold-fish", "horsejump-high", "india", "judo", "kite-surf", "lab-coat",
-    "libby", "loading", "mbike-trick", "motocross-jump", "paragliding-launch", "parkour",
-    "pigs", "scooter-black", "shooting", "soapbox"
-    # "cows", "dance-twirl", "dog", "dogs-jump", "drift-chicane", "drift-straight",
-    # "goat", "gold-fish", "horsejump-high", "india", "judo", "kite-surf", "lab-coat",
-    # "libby", "loading", "mbike-trick", "motocross-jump", "paragliding-launch", "parkour",
-    # "pigs", "scooter-black", "shooting", "soapbox"
-]
-
-VIDEO_NAMES = TAPVID_VIDEO_NAMES
+VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
 NUM_INIT_PARTICLES_ON_MASK = 50
 USE_SAM_FRAME0 = False
-
-# # All videos to process
-# VIDEO_NAMES = [
-#     "bmx-trees", "kite-surf", "parkour", "drift-chicane" , "drift-straight"
-# ]
 
 # Paths
 DAVIS_3D_MOTION_PATH = str(config.DAVIS_3D_MOTION_PATH)

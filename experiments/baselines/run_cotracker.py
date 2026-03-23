@@ -28,19 +28,7 @@ from genparticles.evaluation import get_segmentation_mask
 # Configuration
 # ============================================================================
 
-TAPVID_VIDEO_NAMES = [
-    "drift-chicane", "bike-packing", "blackswan", "bmx-trees", "breakdance", "camel", "car-roundabout",
-    "car-shadow", "cows", "dance-twirl", "dog", "dogs-jump", "drift-straight",
-    "goat", "gold-fish", "horsejump-high", "india", "judo", "kite-surf", "lab-coat",
-    "libby", "loading", "mbike-trick", "motocross-jump", "paragliding-launch", "parkour",
-    "pigs", "scooter-black", "shooting", "soapbox"
-]
-
-# TAPVID_VIDEO_NAMES = [
-#     "india"
-# ]
-
-VIDEO_NAMES = TAPVID_VIDEO_NAMES
+VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
 DAVIS_RGB_PATH = str(config.DAVIS_RGB_PATH)
 DAVIS_SEGMASKS_PATH = str(config.DAVIS_SEGMASKS_PATH)
