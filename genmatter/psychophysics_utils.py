@@ -1699,14 +1699,16 @@ def ransac_motion_only(points_data, ransac_thresh=2.0, fill_value=0.0):
 
     return motion_vectors, outlier_mask
 
-def initialize_model(key, config_num, start_frame, end_frame):
-    """Initialize the HDGMM model with data from the specified configuration."""
+def initialize_model(key, npz_path, start_frame, end_frame):
+    """Initialize the HDGMM model with data from the specified configuration.
+
+    Args:
+        npz_path: Path to ``data.npz`` (e.g. from ``config.rdk_npz_path(config_num)``).
+    """
 
     number_of_hyperblobs = 5
     number_of_blobs = 500
-    # Load data
-    npz_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"assets/RDK/config_{config_num}/data.npz")
-    data = np.load(npz_path)
+    data = np.load(os.fspath(npz_path))
 
     # Extract and scale data
     if start_frame == None or end_frame == None:
@@ -1946,10 +1948,10 @@ def get_model_results_via_datapoints(key, posterior_over_time, outlier_mask, sta
     return final_frame_same_hyperblob
 
 
-def model_prediction_on_stimulus(exp_key, config_num, start_frame, end_frame, probe_timestep, red_point, green_point, num_runs=17):
+def model_prediction_on_stimulus(exp_key, npz_path, start_frame, end_frame, probe_timestep, red_point, green_point, num_runs=17):
     # Initialize the model once
     initialize_model_vmapped = jax.vmap(
-        lambda key: initialize_model(key, config_num=config_num, start_frame=start_frame, end_frame=end_frame)
+        lambda key: initialize_model(key, npz_path, start_frame, end_frame)
     )
     exp_key, init_key = jax.random.split(exp_key, 2)
     init_keys = jax.random.split(init_key, num_runs)
@@ -2009,4 +2011,608 @@ def model_prediction_on_stimulus(exp_key, config_num, start_frame, end_frame, pr
     # Convert the list to a numpy array and compute the mean
     final_results = jnp.array(final_results)
     
+    return final_results
+
+#####################################################################
+# RDK ablation: rdk-ablation-fixed (no hyperblob layer; blob readout)
+#####################################################################
+
+
+def gibbs_blob_means_ablation1(key, hdgmm_state):
+    posterior_key, _ = jax.random.split(key)
+
+    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions
+    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
+    blob_covs = hdgmm_state.blobs_state.blob_covs
+
+    d = datapoint_positions.shape[-1]
+    prior_blob_means = jnp.zeros((hdgmm_state.hypers.n_blobs, d))
+    prior_variance = hdgmm_state.hypers.sigma_H
+
+    n_blobs = hdgmm_state.hypers.n_blobs
+    N_l = jax.ops.segment_sum(
+        jnp.ones(datapoint_positions.shape[0], dtype=datapoint_positions.dtype),
+        blob_assignments,
+        num_segments=n_blobs,
+    )
+
+    posterior_mus, posterior_covs = normal_normal_posterior_full_cov_batched_flexible_prior(
+        datapoint_positions, blob_assignments, prior_blob_means, prior_variance, blob_covs
+    )
+
+    has_points = N_l > 0
+
+    sampled_means = genjax.mv_normal.sample(posterior_key, posterior_mus, posterior_covs)
+
+    prior_cov = jnp.eye(d) * prior_variance
+    prior_samples = genjax.mv_normal.sample(
+        posterior_key, prior_blob_means, jnp.tile(prior_cov[None, :, :], (n_blobs, 1, 1))
+    )
+
+    posterior_blob_means = jnp.where(has_points[:, None], sampled_means, prior_samples)
+
+    return hdgmm_state.replace({"blobs_state": {"blob_means": posterior_blob_means}})
+
+
+def gibbs_blob_vel_means_ablation1(key, hdgmm_state):
+    posterior_key, _ = jax.random.split(key)
+
+    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
+    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
+    likelihood_blob_vel_covs = hdgmm_state.blobs_state.blob_vel_covs
+
+    d = datapoint_vels.shape[-1]
+    prior_blob_vel_means = jnp.zeros((hdgmm_state.hypers.n_blobs, d))
+    prior_variance = hdgmm_state.hypers.sigma_V
+
+    n_blobs = hdgmm_state.hypers.n_blobs
+    N_l = jax.ops.segment_sum(
+        jnp.ones(datapoint_vels.shape[0], dtype=datapoint_vels.dtype),
+        blob_assignments,
+        num_segments=n_blobs,
+    )
+
+    posterior_mus, posterior_covs = normal_normal_posterior_full_cov_batched_flexible_prior(
+        datapoint_vels, blob_assignments, prior_blob_vel_means, prior_variance, likelihood_blob_vel_covs
+    )
+
+    has_points = N_l > 0
+
+    sampled_vel_means = genjax.mv_normal.sample(posterior_key, posterior_mus, posterior_covs)
+
+    zero_velocities = jnp.zeros_like(posterior_mus)
+    posterior_blob_vel_means = jnp.where(has_points[:, None], sampled_vel_means, zero_velocities)
+
+    return hdgmm_state.replace({"blobs_state": {"blob_vel_means": posterior_blob_vel_means}})
+
+
+def initialize_model_ablation1(key, npz_path, start_frame, end_frame):
+    """Flat-blob init (rdk-ablation-fixed). Uses 2 hyperblobs / 5 blobs for K-means (NeurIPS default)."""
+
+    number_of_hyperblobs = 2
+    number_of_blobs = 5
+    data = np.load(os.fspath(npz_path))
+
+    if start_frame is None or end_frame is None:
+        points_data = data["points_data"]
+    else:
+        points_data = data["points_data"][start_frame : end_frame + 2]
+
+    motion_vectors, outlier_mask = ransac_motion_only(points_data, ransac_thresh=50, fill_value=0.0)
+
+    num_t_steps = motion_vectors.shape[0]
+
+    kmeans_chm_original = make_hierarchical_kmeans_chm_2d(
+        points_data, number_of_blobs, number_of_hyperblobs, frame_idx=0, motion_vectors=motion_vectors
+    )
+
+    vel_scale = 1
+    v_sigma = 1e14
+
+    kmeans_chm = kmeans_chm_original.at["blobs", "blob_vel_covs"].set(
+        kmeans_chm_original["blobs", "blob_vel_covs"] * vel_scale
+    )
+
+    GIBBS_DIALS = {
+        "blob_weights": True,
+        "hyperblob_weights": False,
+        "blob_assignments": True,
+        "hyperblob_assignments": False,
+        "hyperblob_covs": False,
+        "blob_covs": False,
+        "blob_vel_covs": False,
+        "blob_vel_means": True,
+        "hyperblob_means": False,
+        "blob_means": True,
+        "hyperblob_rot_vels": False,
+        "hyperblob_trans_vels": False,
+    }
+
+    num_datapoints = kmeans_chm["datapoints", "datapoint_positions"].shape[0]
+    num_blobs = kmeans_chm["blobs", "hyperblob_assignments"].shape[0]
+    num_hyperblobs = kmeans_chm["hyperblobs", "hyperblob_means"].shape[0]
+    empirical_mu_H = jnp.median(kmeans_chm["datapoints", "datapoint_positions"], axis=0)
+    empirical_sigma_H = (400 * 0.5) ** 2
+    empirical_Psi_B = jnp.median(kmeans_chm["blobs", "blob_covs"], axis=0)
+    empirical_Psi_H = jnp.median(kmeans_chm["hyperblobs", "hyperblob_covs"], axis=0)
+    empirical_Psi_V = jnp.median(kmeans_chm["blobs", "blob_vel_covs"], axis=0)
+    empirical_nu_H = f_(int(jnp.median(kmeans_chm["hyperblobs", "hyperblob_weights"]) * num_blobs))
+    empirical_nu_B = empirical_nu_V = f_(
+        int(jnp.median(kmeans_chm["blobs", "blob_weights"]) * num_datapoints)
+    )
+
+    hypers = HDGMM_Hyperparams.create(
+        outlier_prob=f_(5e-2),
+        outlier_velocity_gamma_shape=f_(5.0),
+        outlier_velocity_gamma_rate=f_(1.0),
+        alpha=f_(99.994),
+        beta=f_(0.009899),
+        mu_H=empirical_mu_H,
+        sigma_H=empirical_sigma_H,
+        nu_H=empirical_nu_H,
+        Psi_H=empirical_Psi_H,
+        nu_B=empirical_nu_B,
+        Psi_B=empirical_Psi_B,
+        sigma_V=f_(v_sigma),
+        nu_V=empirical_nu_V,
+        Psi_V=empirical_Psi_V * vel_scale,
+        translation_gaussian_scale=snp(f_(400)),
+        translation_max_radius=snp(40),
+        translation_num_radii_cells=snp(400),
+        translation_theta_step_deg=snp(1),
+        rotation_vmf_kappa=snp(f_(75)),
+        rotation_angle_max_deg=snp(5),
+        rotation_angle_step_deg=snp(0.02),
+        n_hyperblobs=num_hyperblobs,
+        n_blobs=num_blobs,
+        n_datapoints=num_datapoints,
+    )
+
+    key, key_init = jax.random.split(key, 2)
+    init_tr, _ = model_jimportance(key_init, kmeans_chm, (hypers,))
+    init_hdgmm_state = init_tr.get_retval()
+
+    init_hdgmm_state = init_hdgmm_state.replace(
+        datapoints_state=init_hdgmm_state.datapoints_state.replace(
+            blob_assignments=init_hdgmm_state.datapoints_state.blob_assignments.at[outlier_mask[0]].set(
+                number_of_blobs
+            )
+        )
+    )
+
+    return key, init_hdgmm_state, points_data, motion_vectors, outlier_mask, num_t_steps, number_of_blobs, GIBBS_DIALS
+
+
+@jax.jit
+def f_gibbs_sweep_return_last_state_ablation1(i, carry):
+    key, hdgmm_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs = carry
+
+    def datapoint_update_loop(i, state_key_tuple):
+        hdgmm_state, key = state_key_tuple
+        key, gibbs_key = jax.random.split(key)
+        hdgmm_state = jax.lax.cond(
+            gibbs_dials["blob_assignments"],
+            lambda k, s: gibbs_blob_assignments(
+                k, s, position_only=False, velocity_only=False, disable_outlier_prob=True
+            ),
+            empty_gibbs,
+            gibbs_key,
+            hdgmm_state,
+        )
+        return (hdgmm_state, key)
+
+    def blob_update_loop(i, state_key_tuple):
+        hdgmm_state, key = state_key_tuple
+        key, gibbs_key = jax.random.split(key)
+        hdgmm_state = jax.lax.cond(
+            gibbs_dials["blob_weights"], gibbs_blob_weights, empty_gibbs, gibbs_key, hdgmm_state
+        )
+
+        key, gibbs_key = jax.random.split(key)
+        hdgmm_state = jax.lax.cond(
+            gibbs_dials["blob_covs"], gibbs_blob_covs, empty_gibbs, gibbs_key, hdgmm_state
+        )
+
+        key, gibbs_key = jax.random.split(key)
+        hdgmm_state = jax.lax.cond(
+            gibbs_dials["blob_vel_covs"], gibbs_blob_vel_covs, empty_gibbs, gibbs_key, hdgmm_state
+        )
+
+        key, gibbs_key = jax.random.split(key)
+        hdgmm_state = jax.lax.cond(
+            gibbs_dials["blob_vel_means"],
+            gibbs_blob_vel_means_ablation1,
+            empty_gibbs,
+            gibbs_key,
+            hdgmm_state,
+        )
+
+        key, gibbs_key = jax.random.split(key)
+        hdgmm_state = jax.lax.cond(
+            gibbs_dials["blob_means"], gibbs_blob_means_ablation1, empty_gibbs, gibbs_key, hdgmm_state
+        )
+
+        return (hdgmm_state, key)
+
+    hdgmm_state, key = jax.lax.fori_loop(0, num_gibbs_inner_loops, datapoint_update_loop, (hdgmm_state, key))
+    hdgmm_state, key = jax.lax.fori_loop(0, num_gibbs_inner_loops, blob_update_loop, (hdgmm_state, key))
+
+    return (key, hdgmm_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs)
+
+
+def hdgmm_full_gibbs_return_last_state_ablation1(
+    key, init_hdgmm_state, num_gibbs_sweeps, gibbs_dials, use_weighted_blobs, num_gibbs_inner_loops
+):
+    carry = (key, init_hdgmm_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs)
+    carry = jax.lax.fori_loop(0, num_gibbs_sweeps, f_gibbs_sweep_return_last_state_ablation1, carry)
+    _, hdgmm_state, _, _, _ = carry
+    return hdgmm_state
+
+
+def run_gibbs_sampling_ablation1(
+    key, init_hdgmm_state, points_data, motion_vectors, outlier_mask, num_t_steps, number_of_blobs, GIBBS_DIALS, show_viz=False
+):
+    NUM_GIBBS_SWEEPS = 5
+    posterior_over_time = []
+
+    for t in range(num_t_steps):
+        if t > 0:
+            init_hdgmm_state = init_hdgmm_state.replace(
+                {
+                    "datapoints_state": {
+                        "datapoint_positions": points_data[t],
+                        "datapoint_vels": motion_vectors[t],
+                    }
+                }
+            )
+
+            init_hdgmm_state = init_hdgmm_state.replace(
+                {
+                    "blobs_state": {
+                        "blob_means": init_hdgmm_state.blobs_state.blob_means
+                        + init_hdgmm_state.blobs_state.blob_vel_means
+                    }
+                }
+            )
+
+        key, key_gibbs = jax.random.split(key, 2)
+
+        init_hdgmm_state = hdgmm_full_gibbs_return_last_state_ablation1(
+            key_gibbs, init_hdgmm_state, NUM_GIBBS_SWEEPS, GIBBS_DIALS, False, 1
+        )
+
+        init_hdgmm_state = init_hdgmm_state.replace(
+            datapoints_state=init_hdgmm_state.datapoints_state.replace(
+                blob_assignments=init_hdgmm_state.datapoints_state.blob_assignments.at[outlier_mask[t]].set(
+                    number_of_blobs
+                )
+            )
+        )
+
+        posterior_over_time.append(hdgmm_TraceWrapper(force_retval=init_hdgmm_state))
+
+    posterior_over_time = pytree_stack(posterior_over_time)
+
+    return posterior_over_time, outlier_mask
+
+
+def model_prediction_on_stimulus_ablation1(
+    exp_key, npz_path, start_frame, end_frame, probe_timestep, red_point, green_point, num_runs=17
+):
+    initialize_model_ablation1_vmapped = jax.vmap(
+        lambda key: initialize_model_ablation1(key, npz_path, start_frame, end_frame)
+    )
+    exp_key, init_key = jax.random.split(exp_key, 2)
+    init_keys = jax.random.split(init_key, num_runs)
+    _, init_hdgmm_states, points_data, motion_vectors, outlier_masks, num_t_steps, number_of_blobs, GIBBS_DIALS = (
+        initialize_model_ablation1_vmapped(init_keys)
+    )
+
+    points_data = points_data[0]
+    motion_vectors = motion_vectors[0]
+    outlier_masks = outlier_masks[0]
+    num_t_steps = num_t_steps[0]
+    number_of_blobs = number_of_blobs[0]
+
+    GIBBS_DIALS = {
+        "blob_weights": True,
+        "hyperblob_weights": False,
+        "blob_assignments": True,
+        "hyperblob_assignments": False,
+        "hyperblob_covs": False,
+        "blob_covs": False,
+        "blob_vel_covs": False,
+        "blob_vel_means": True,
+        "hyperblob_means": False,
+        "blob_means": True,
+        "hyperblob_rot_vels": False,
+        "hyperblob_trans_vels": False,
+    }
+
+    key, gibbs_keys = jax.random.split(exp_key, 2)
+    exp_keys = jax.random.split(gibbs_keys, num_runs)
+
+    run_gibbs_sampling_ablation1_vmapped = jax.vmap(
+        lambda key, init_hdgmm_state: run_gibbs_sampling_ablation1(
+            key,
+            init_hdgmm_state,
+            points_data,
+            motion_vectors,
+            outlier_masks,
+            num_t_steps,
+            number_of_blobs,
+            GIBBS_DIALS,
+            show_viz=False,
+        )
+    )
+    posterior_over_time_list, outlier_mask_list = run_gibbs_sampling_ablation1_vmapped(exp_keys, init_hdgmm_states)
+
+    final_results = []
+    for i in range(num_runs):
+        posterior = posterior_over_time_list[i]
+        outlier_mask = outlier_mask_list[i]
+        final_frame_same_blob = get_model_results_via_datapoints_ablation1(
+            key,
+            posterior,
+            outlier_mask,
+            start_frame,
+            end_frame,
+            red_point,
+            green_point,
+            probe_timestep=probe_timestep,
+        )
+        final_results.append(final_frame_same_blob)
+
+    final_results = jnp.array(final_results)
+    return final_results
+
+
+def get_model_results_via_datapoints_ablation1(
+    key, posterior_over_time, outlier_mask, start_frame, end_frame, red_point, green_point, probe_timestep
+):
+    probe_index = probe_timestep - start_frame
+    num_frames = end_frame - start_frame
+
+    red_blob_over_time = []
+    green_blob_over_time = []
+
+    def find_neighbors_and_blob(point, positions, indices, blob_assignments, k=5):
+        distances = jnp.sqrt(jnp.sum((positions - point) ** 2, axis=1))
+
+        nearest_indices = jnp.argsort(distances)[:k]
+
+        original_indices = indices[nearest_indices]
+        nearest_blob_assignments = blob_assignments[original_indices]
+
+        blob_counts = {}
+        for assignment in nearest_blob_assignments:
+            assignment_int = int(assignment)
+            if assignment_int in blob_counts:
+                blob_counts[assignment_int] += 1
+            else:
+                blob_counts[assignment_int] = 1
+
+        most_common_blob = max(blob_counts, key=blob_counts.get)
+
+        same_blob_mask = nearest_blob_assignments == most_common_blob
+        same_blob_indices = original_indices[same_blob_mask]
+
+        return most_common_blob, same_blob_indices, original_indices
+
+    red_current_point = jnp.array(red_point).astype(jnp.float32)
+    green_current_point = jnp.array(green_point).astype(jnp.float32)
+
+    for t in range(probe_index, num_frames):
+        current_posterior = posterior_over_time[t].retval
+        current_outlier_mask = outlier_mask[t]
+
+        datapoint_positions = current_posterior.datapoints_state.datapoint_positions
+        blob_assignments = current_posterior.datapoints_state.blob_assignments
+
+        positions_jnp = jnp.array(datapoint_positions)
+        non_outlier_mask = ~current_outlier_mask
+        valid_positions = positions_jnp[non_outlier_mask]
+        valid_indices = jnp.where(non_outlier_mask)[0]
+
+        k = 10
+        red_blob, red_same_blob_indices, red_all_indices = find_neighbors_and_blob(
+            red_current_point, valid_positions, valid_indices, blob_assignments, k
+        )
+        green_blob, green_same_blob_indices, green_all_indices = find_neighbors_and_blob(
+            green_current_point, valid_positions, valid_indices, blob_assignments, k
+        )
+
+        red_blob_over_time.append(red_blob)
+        green_blob_over_time.append(green_blob)
+
+        if t < num_frames - 1:
+            datapoint_velocities = current_posterior.datapoints_state.datapoint_vels
+
+            if len(red_same_blob_indices) > 0:
+                red_velocities = jnp.array(datapoint_velocities)[red_same_blob_indices]
+                red_median_velocity = jnp.median(red_velocities, axis=0)
+                red_current_point = red_current_point + red_median_velocity
+
+            if len(green_same_blob_indices) > 0:
+                green_velocities = jnp.array(datapoint_velocities)[green_same_blob_indices]
+                green_median_velocity = jnp.median(green_velocities, axis=0)
+                green_current_point = green_current_point + green_median_velocity
+
+    red_blob_over_time = jnp.array(red_blob_over_time)
+    green_blob_over_time = jnp.array(green_blob_over_time)
+
+    same_blob_over_time = red_blob_over_time == green_blob_over_time
+    final_frame_same_blob = same_blob_over_time[-1]
+
+    return final_frame_same_blob
+
+
+#####################################################################
+# RDK ablation: rdk-ablation-adaptive (flat + blob/vel cov Gibbs)
+#####################################################################
+
+
+def initialize_model_ablation2(key, npz_path, start_frame, end_frame):
+    number_of_hyperblobs = 5
+    number_of_blobs = 500
+    data = np.load(os.fspath(npz_path))
+
+    if start_frame is None or end_frame is None:
+        points_data = data["points_data"]
+    else:
+        points_data = data["points_data"][start_frame : end_frame + 2]
+
+    motion_vectors, outlier_mask = ransac_motion_only(points_data, ransac_thresh=50, fill_value=0.0)
+
+    num_t_steps = motion_vectors.shape[0]
+
+    kmeans_chm_original = make_hierarchical_kmeans_chm_2d(
+        points_data, number_of_blobs, number_of_hyperblobs, frame_idx=0, motion_vectors=motion_vectors
+    )
+
+    vel_scale = 1
+    v_sigma = 1e14
+
+    kmeans_chm = kmeans_chm_original.at["blobs", "blob_vel_covs"].set(
+        kmeans_chm_original["blobs", "blob_vel_covs"] * vel_scale
+    )
+
+    GIBBS_DIALS = {
+        "blob_weights": True,
+        "hyperblob_weights": False,
+        "blob_assignments": True,
+        "hyperblob_assignments": False,
+        "hyperblob_covs": False,
+        "blob_covs": True,
+        "blob_vel_covs": True,
+        "blob_vel_means": True,
+        "hyperblob_means": False,
+        "blob_means": True,
+        "hyperblob_rot_vels": False,
+        "hyperblob_trans_vels": False,
+    }
+
+    num_datapoints = kmeans_chm["datapoints", "datapoint_positions"].shape[0]
+    num_blobs = kmeans_chm["blobs", "hyperblob_assignments"].shape[0]
+    num_hyperblobs = kmeans_chm["hyperblobs", "hyperblob_means"].shape[0]
+    empirical_mu_H = jnp.median(kmeans_chm["datapoints", "datapoint_positions"], axis=0)
+    empirical_sigma_H = (400 * 0.5) ** 2
+    empirical_Psi_B = jnp.median(kmeans_chm["blobs", "blob_covs"], axis=0)
+    empirical_Psi_H = jnp.median(kmeans_chm["hyperblobs", "hyperblob_covs"], axis=0)
+    empirical_Psi_V = jnp.median(kmeans_chm["blobs", "blob_vel_covs"], axis=0)
+    empirical_nu_H = f_(int(jnp.median(kmeans_chm["hyperblobs", "hyperblob_weights"]) * num_blobs))
+    empirical_nu_B = empirical_nu_V = f_(
+        int(jnp.median(kmeans_chm["blobs", "blob_weights"]) * num_datapoints)
+    )
+
+    hypers = HDGMM_Hyperparams.create(
+        outlier_prob=f_(5e-2),
+        outlier_velocity_gamma_shape=f_(5.0),
+        outlier_velocity_gamma_rate=f_(1.0),
+        alpha=f_(99.994),
+        beta=f_(0.009899),
+        mu_H=empirical_mu_H,
+        sigma_H=empirical_sigma_H,
+        nu_H=empirical_nu_H,
+        Psi_H=empirical_Psi_H,
+        nu_B=empirical_nu_B,
+        Psi_B=empirical_Psi_B,
+        sigma_V=f_(v_sigma),
+        nu_V=empirical_nu_V,
+        Psi_V=empirical_Psi_V * vel_scale,
+        translation_gaussian_scale=snp(f_(400)),
+        translation_max_radius=snp(40),
+        translation_num_radii_cells=snp(400),
+        translation_theta_step_deg=snp(1),
+        rotation_vmf_kappa=snp(f_(75)),
+        rotation_angle_max_deg=snp(5),
+        rotation_angle_step_deg=snp(0.02),
+        n_hyperblobs=num_hyperblobs,
+        n_blobs=num_blobs,
+        n_datapoints=num_datapoints,
+    )
+
+    key, key_init = jax.random.split(key, 2)
+    init_tr, _ = model_jimportance(key_init, kmeans_chm, (hypers,))
+    init_hdgmm_state = init_tr.get_retval()
+
+    init_hdgmm_state = init_hdgmm_state.replace(
+        datapoints_state=init_hdgmm_state.datapoints_state.replace(
+            blob_assignments=init_hdgmm_state.datapoints_state.blob_assignments.at[outlier_mask[0]].set(
+                number_of_blobs
+            )
+        )
+    )
+
+    return key, init_hdgmm_state, points_data, motion_vectors, outlier_mask, num_t_steps, number_of_blobs, GIBBS_DIALS
+
+
+def model_prediction_on_stimulus_ablation2(
+    exp_key, npz_path, start_frame, end_frame, probe_timestep, red_point, green_point, num_runs=17
+):
+    initialize_model_ablation2_vmapped = jax.vmap(
+        lambda key: initialize_model_ablation2(key, npz_path, start_frame, end_frame)
+    )
+    exp_key, init_key = jax.random.split(exp_key, 2)
+    init_keys = jax.random.split(init_key, num_runs)
+    _, init_hdgmm_states, points_data, motion_vectors, outlier_masks, num_t_steps, number_of_blobs, GIBBS_DIALS = (
+        initialize_model_ablation2_vmapped(init_keys)
+    )
+
+    points_data = points_data[0]
+    motion_vectors = motion_vectors[0]
+    outlier_masks = outlier_masks[0]
+    num_t_steps = num_t_steps[0]
+    number_of_blobs = number_of_blobs[0]
+
+    GIBBS_DIALS = {
+        "blob_weights": True,
+        "hyperblob_weights": False,
+        "blob_assignments": True,
+        "hyperblob_assignments": False,
+        "hyperblob_covs": False,
+        "blob_covs": True,
+        "blob_vel_covs": True,
+        "blob_vel_means": True,
+        "hyperblob_means": False,
+        "blob_means": True,
+        "hyperblob_rot_vels": False,
+        "hyperblob_trans_vels": False,
+    }
+
+    key, gibbs_keys = jax.random.split(exp_key, 2)
+    exp_keys = jax.random.split(gibbs_keys, num_runs)
+
+    run_gibbs_sampling_ablation1_vmapped = jax.vmap(
+        lambda key, init_hdgmm_state: run_gibbs_sampling_ablation1(
+            key,
+            init_hdgmm_state,
+            points_data,
+            motion_vectors,
+            outlier_masks,
+            num_t_steps,
+            number_of_blobs,
+            GIBBS_DIALS,
+            show_viz=False,
+        )
+    )
+    posterior_over_time_list, outlier_mask_list = run_gibbs_sampling_ablation1_vmapped(exp_keys, init_hdgmm_states)
+
+    final_results = []
+    for i in range(num_runs):
+        posterior = posterior_over_time_list[i]
+        outlier_mask = outlier_mask_list[i]
+        final_frame_same_blob = get_model_results_via_datapoints_ablation1(
+            key,
+            posterior,
+            outlier_mask,
+            start_frame,
+            end_frame,
+            red_point,
+            green_point,
+            probe_timestep=probe_timestep,
+        )
+        final_results.append(final_frame_same_blob)
+
+    final_results = jnp.array(final_results)
     return final_results

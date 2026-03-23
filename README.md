@@ -99,6 +99,18 @@ Under **`tapvid_davis_30_videos_processed/`** you need:
 | `tapvid_davis_dino/` | `{video}_dino_pca_per_pixel.npz` (from `davis-extract-dino`) |
 | `tapvid_davis_SAM_frame0/` | `{video}_SAM_frame0.png` |
 
+### RDK psychophysics (`assets/RDK/`)
+
+Place **`RDK_configs.json`** and **`config_<n>/data.npz`** under **`GENMATTER_RDK_DIR`** (default: **`<repo>/assets/RDK`**). Motion for the benchmark is estimated with **RANSAC** only (no GT-motion / noise path).
+
+| Path | Contents |
+|------|----------|
+| **`RDK_configs.json`** | Stimulus IDs, frames, probe, points, `ground_truth` |
+| **`config_<n>/data.npz`** | `points_data` (and any fields your preprocessing writes) |
+| **`reproducibility_keys.json`** (optional) | Map `stim_id` → integer used as `jkey(...)` root per stimulus; if present, the benchmark uses it by default (legacy name **`keys.json`** is still accepted). |
+
+Benchmark runs and the correlation plot are listed under **How to run experiments** (same `uv run` pattern as Gestalt and DAVIS). Optional flags for the benchmark: `--outer-trials`, `--num-runs`, `--output-dir`, `--no-repro-keys`, `--repro-keys-path`, `--require-repro-keys` after `--`. The correlation postprocess reads **`results/psychophysics/full_benchmark.json`** by default (override with `--input` after `--`) and writes **`results/postprocessing/psychophysics_correlation_<stem>.png`** (human vs model scatter).
+
 ---
 
 ## How to run experiments
@@ -116,6 +128,11 @@ uv run python run_experiments.py davis-tracking
 uv run python run_experiments.py davis-subsampling
 uv run python run_experiments.py davis-ablation
 uv run python run_experiments.py cotracker
+
+# RDK psychophysics (needs assets/RDK/; see data layout above)
+uv run python run_experiments.py psychophysics-benchmark
+uv run python run_experiments.py psychophysics-rdk-ablation-fixed
+uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
 ```
 
 **Postprocessing** (after the matching runs have written under `results/`):
@@ -124,9 +141,12 @@ uv run python run_experiments.py cotracker
 uv run python run_experiments.py postprocess-gestalt          # + SegAnyMo / FlowSAM paths in config
 uv run python run_experiments.py postprocess-gestalt-ablation
 uv run python run_experiments.py postprocess-davis
+uv run python run_experiments.py postprocess-psychophysics-correlation
+# optional: different benchmark JSON (path is under GENMATTER_RESULTS_DIR if you relocate results/)
+uv run python run_experiments.py postprocess-psychophysics-correlation -- --input path/to/other_benchmark.json
 ```
 
-Outputs: `results/postprocessing/*.json` and `*.csv`.
+Outputs: `results/postprocessing/*.json`, `*.csv`, and psychophysics `*.png` when using the correlation command.
 
 ---
 
@@ -141,6 +161,8 @@ Outputs: `results/postprocessing/*.json` and `*.csv`.
 | `GENMATTER_RAFT_FLOWS_PATH` | Trimmed RAFT output directory (default `genmatter_data/assets/raft_flows`) |
 | `GENMATTER_RAFT_NUM_FLOW_FRAMES` | Flow frames kept in trimmed RAFT (default `5`) |
 | `GENMATTER_RESULTS_DIR` | Where `results/` lives |
+| `GENMATTER_RDK_DIR` | Root for RDK psychophysics (`RDK_configs.json`, `config_*/data.npz`; default `<repo>/assets/RDK`) |
+| `GENMATTER_RDK_REPRO_KEYS_PATH` | Explicit path to `reproducibility_keys.json` (overrides default `<GENMATTER_RDK_DIR>/reproducibility_keys.json`) |
 | `SEGANYMO_BASE_PATH` | For `postprocess-gestalt` SegAnyMo masks |
 
 ---
@@ -151,10 +173,11 @@ Outputs: `results/postprocessing/*.json` and `*.csv`.
 pyproject.toml / uv.lock  # Dependencies (uv); CUDA PyTorch + JAX via configured indexes
 .python-version           # 3.11 (used by uv)
 config.py                 # Paths + TAPVID_DAVIS_VIDEO_NAMES + GESTALT_SCENES/TEXTURES
-run_experiments.py        # CLI: populate-data, gestalt, davis-*, cotracker, postprocess-*
+run_experiments.py        # CLI: populate-data, gestalt, davis-*, psychophysics-*, cotracker, postprocess-*
 scripts/populate_genmatter_data.py
 experiments/gestalt/      # Mask-propagation Gestalt
 experiments/davis/        # DINO extract, tracking, subsampling, ablation
+experiments/psychophysics/ # RDK human–model benchmark (full + ablations)
 experiments/baselines/    # CoTracker3
 postprocessing/           # Metrics aggregation
 genmatter/                # Core library

@@ -3,6 +3,8 @@ Central paths and shared experiment constants for GenMatter.
 
 Gestalt inputs live under ``genmatter_data/assets/`` (see README for the exact
 file tree). DAVIS TAP-Vid data stays under ``<GENMATTER_DAVIS_DIR>/tapvid_davis_30_videos_processed/``.
+RDK psychophysics data lives under ``GENMATTER_RDK_DIR`` (default ``<repo>/assets/RDK``).
+Optional per-stimulus JAX seeds: ``GENMATTER_RDK_REPRO_KEYS_PATH`` or ``reproducibility_keys.json`` in that directory.
 
 **No symlinks required:** if ``<repo>/assets`` or ``<repo>/raft_flows`` are missing
 or are symlinks, defaults fall back to ``GENMATTER_LEGACY_DATA_ROOT`` (see below).
@@ -112,6 +114,28 @@ TAPVID_DAVIS_VIDEO_NAMES = (
 )
 
 RESULTS_DIR = Path(os.environ.get("GENMATTER_RESULTS_DIR", REPO_ROOT / "results"))
+
+# RDK psychophysics: ``<RDK_ROOT>/config_<n>/data.npz`` and ``RDK_configs.json``
+RDK_ROOT = Path(os.environ.get("GENMATTER_RDK_DIR", REPO_ROOT / "assets" / "RDK")).resolve()
+
+
+def rdk_npz_path(config_num: int) -> Path:
+    """Path to ``data.npz`` for a given RDK configuration index."""
+    return RDK_ROOT / f"config_{config_num}" / "data.npz"
+
+
+def rdk_configs_json_path() -> Path:
+    return RDK_ROOT / "RDK_configs.json"
+
+
+def rdk_reproducibility_keys_json_path() -> Path:
+    """Per-stimulus integer seeds for JAX ``jkey(...)`` (optional; see psychophysics benchmark)."""
+    if os.environ.get("GENMATTER_RDK_REPRO_KEYS_PATH"):
+        return Path(os.environ["GENMATTER_RDK_REPRO_KEYS_PATH"]).resolve()
+    return RDK_ROOT / "reproducibility_keys.json"
+
+
+PSYCHOPHYSICS_OUTPUT_DIR = RESULTS_DIR / "psychophysics"
 
 # DAVIS: parent directory must contain ``tapvid_davis_30_videos_processed/``
 DAVIS_PARENT_DIR = _resolve_assets_parent()
