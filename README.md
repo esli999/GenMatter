@@ -101,7 +101,14 @@ Under **`tapvid_davis_30_videos_processed/`** you need:
 
 ### RDK psychophysics (`assets/RDK/`)
 
-Place **`RDK_configs.json`** and **`config_<n>/data.npz`** under **`GENMATTER_RDK_DIR`** (default: **`<repo>/assets/RDK`**). Motion for the benchmark is estimated with **RANSAC** only (no GT-motion / noise path).
+**Frozen reference bundle:** **`assets/RDK_groundtruth/`** holds the previous **`assets/RDK`** JSON files (and optional full trees) for comparison. The active benchmark directory remains **`GENMATTER_RDK_DIR`** (default **`<repo>/assets/RDK`**).
+
+**Regenerate RDK** (physics MP4s → RAFT `data.npz` → canonical JSON → GIFs):
+
+```bash
+uv run python run_experiments.py rdk-preprocess
+# Skip GIFs: add -- --skip-gifs
+```
 
 | Path | Contents |
 |------|----------|

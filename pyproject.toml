@@ -24,6 +24,9 @@ dependencies = [
     "matplotlib==3.10.6",
     "imageio[ffmpeg]==2.37.0",
     "tqdm==4.67.1",
+    "rich==13.9.4",
+    "pymunk==6.8.1",
+    "pygame==2.6.1",
 ]
 
 [tool.hatch.build.targets.wheel]
