@@ -6,14 +6,15 @@ Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TA
 
 - CUDA 12.4+ and a compatible NVIDIA driver  
 - GPU with ≥ 24 GB memory (as used in the paper setup)  
-- Python 3.11  
+- Python 3.11 (pinned via `.python-version`; uv will download it if missing)  
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for the virtualenv and locked dependencies  
 
 ## Install
 
+From the repository root:
+
 ```bash
-conda create -n genmatter python=3.11
-conda activate genmatter
-pip install -r requirements.txt
+uv sync
 ```
 
 ## Data layout (defaults)
@@ -52,14 +53,13 @@ mv genmatter_data/raft_flows genmatter_data/assets/
 Copies the **minimal** Gestalt file set and writes **trimmed** RAFT npz under `genmatter_data/assets/`:
 
 ```bash
-conda activate genmatter
-python run_experiments.py populate-data
+uv run python run_experiments.py populate-data
 # optional: only refresh RAFT
-python run_experiments.py populate-data --raft-only
+uv run python run_experiments.py populate-data --raft-only
 ```
 
 Source defaults: same resolution as `config.POPULATE_*` (real repo dirs, else `GENMATTER_LEGACY_DATA_ROOT`).  
-Override: `python scripts/populate_genmatter_data.py --source /path --raft-source /path`
+Override: `uv run python scripts/populate_genmatter_data.py --source /path --raft-source /path`
 
 ---
 
@@ -103,37 +103,27 @@ Under **`tapvid_davis_30_videos_processed/`** you need:
 
 ## How to run experiments
 
-Use the same conda env you installed into (**JAX / PyTorch / genmatter live there**):
-
-```bash
-conda activate genmatter
-cd /path/to/GenMatter   # repo root
-```
-
-Then:
-
 ```bash
 # 0) One-time: DINO features for DAVIS (needs RGB frames + 3d motion npzs already)
-python run_experiments.py davis-extract-dino
+uv run python run_experiments.py davis-extract-dino
 
 # Gestalt (needs genmatter_data/assets/ populated)
-python run_experiments.py gestalt
-python run_experiments.py gestalt-depth-ablation
+uv run python run_experiments.py gestalt
+uv run python run_experiments.py gestalt-depth-ablation
 
 # DAVIS HDGMM + baselines
-python run_experiments.py davis-tracking
-python run_experiments.py davis-subsampling
-python run_experiments.py davis-ablation
-python run_experiments.py cotracker
+uv run python run_experiments.py davis-tracking
+uv run python run_experiments.py davis-subsampling
+uv run python run_experiments.py davis-ablation
+uv run python run_experiments.py cotracker
 ```
 
-**Postprocessing** (after the matching runs have written under `results/`; same env):
+**Postprocessing** (after the matching runs have written under `results/`):
 
 ```bash
-conda activate genmatter
-python run_experiments.py postprocess-gestalt          # + SegAnyMo / FlowSAM paths in config
-python run_experiments.py postprocess-gestalt-ablation
-python run_experiments.py postprocess-davis
+uv run python run_experiments.py postprocess-gestalt          # + SegAnyMo / FlowSAM paths in config
+uv run python run_experiments.py postprocess-gestalt-ablation
+uv run python run_experiments.py postprocess-davis
 ```
 
 Outputs: `results/postprocessing/*.json` and `*.csv`.
@@ -158,6 +148,8 @@ Outputs: `results/postprocessing/*.json` and `*.csv`.
 ## Repo map
 
 ```
+pyproject.toml / uv.lock  # Dependencies (uv); CUDA PyTorch + JAX via configured indexes
+.python-version           # 3.11 (used by uv)
 config.py                 # Paths + TAPVID_DAVIS_VIDEO_NAMES + GESTALT_SCENES/TEXTURES
 run_experiments.py        # CLI: populate-data, gestalt, davis-*, cotracker, postprocess-*
 scripts/populate_genmatter_data.py

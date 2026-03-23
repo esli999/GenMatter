@@ -9,7 +9,7 @@ import genjax
 from genjax import exact_density, Const, Pytree
 import tensorflow_probability.substrates.jax as tfp
 tfd = tfp.distributions
-from .datatypes import Super_Pytree
+from .trace_wrappers import Super_Pytree
 
 @dataclass(frozen=True)
 class StaticJnp:
