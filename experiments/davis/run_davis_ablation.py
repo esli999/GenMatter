@@ -32,12 +32,12 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 import config
 
-from genparticles.datatypes import *
-from genparticles.model_3d import *
-from genparticles.inference import *
-from genparticles.dataloader import *
-from genparticles.utils import *
-from genparticles.evaluation import *
+from genmatter.datatypes import *
+from genmatter.model_3d import *
+from genmatter.inference import *
+from genmatter.dataloader import *
+from genmatter.utils import *
+from genmatter.evaluation import *
 
 import genjax
 from genjax import Const, gen, Pytree
@@ -1421,7 +1421,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         all_results = {video_name: [tracking_data]}
         experiment_metrics, best_visualization_data = evaluate_single_davis_video(
             davis_name=video_name,
-            multiple_genparticles_list=all_results[video_name],
+            multiple_genmatter_list=all_results[video_name],
             annotations_path=DAVIS_SEGMASKS_PATH,
             counting_threshold=BLOB_COUNTING_THRESHOLD,
             img_dims=img_dims,

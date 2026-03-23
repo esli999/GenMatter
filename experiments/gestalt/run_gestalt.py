@@ -24,13 +24,13 @@ from experiments.gestalt.algorithm import (
     compute_3d_points_and_motion, extract_gestalt_segmentation
 )
 
-from genparticles.utils import make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob
+from genmatter.utils import make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob
 
-from genparticles.datatypes import *
-from genparticles.model_3d import *
-from genparticles.inference import *
-from genparticles.dataloader import *
-from genparticles.utils import *
+from genmatter.datatypes import *
+from genmatter.model_3d import *
+from genmatter.inference import *
+from genmatter.dataloader import *
+from genmatter.utils import *
 
 # JIT compile model functions
 model_jsimulate = jax.jit(HDGMM_model_3d.simulate)

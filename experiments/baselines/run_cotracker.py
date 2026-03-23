@@ -22,7 +22,7 @@ from tqdm import tqdm
 # Add parent directory to path
 sys.path.insert(0, str(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))))
 import config
-from genparticles.evaluation import get_segmentation_mask
+from genmatter.evaluation import get_segmentation_mask
 
 # ============================================================================
 # Configuration

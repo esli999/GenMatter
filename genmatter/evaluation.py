@@ -1,5 +1,5 @@
 """
-Evaluation metrics for GenParticles tracking.
+Evaluation metrics for GenMatter tracking.
 
 This module computes multiple metrics for evaluating particle-based tracking:
 
@@ -66,7 +66,7 @@ def get_segmentation_mask(davis_name, frame_idx, annotations_path, img_dims = No
 
 
 def evaluate_tracking_results(
-    davis_genparticles_dict, 
+    davis_genmatter_dict, 
     annotations_path,
     counting_threshold=100, 
     img_dims=(520, 960), 
@@ -75,10 +75,10 @@ def evaluate_tracking_results(
     experiment_name="tracking_evaluation"
 ):
     """
-    Evaluate tracking results for multiple GenParticles runs with different random trials across multiple DAVIS datasets.
+    Evaluate tracking results for multiple GenMatter runs with different random trials across multiple DAVIS datasets.
 
     Args:
-        davis_genparticles_dict: Dictionary where keys are davis_names and values are lists of lists.
+        davis_genmatter_dict: Dictionary where keys are davis_names and values are lists of lists.
             Each outer list is for a different random trial, each inner list is over all frames.
             Each element is a dict with 'n_blobs' and 'blob_assignments'.
         annotations_path: Path to the DAVIS annotations
@@ -108,7 +108,7 @@ def evaluate_tracking_results(
     all_datasets_results = {}
     
     # Process each dataset
-    for davis_name, multiple_genparticles_list in davis_genparticles_dict.items():
+    for davis_name, multiple_genmatter_list in davis_genmatter_dict.items():
         # Get first frame segmentation mask
         first_frame_mask = get_segmentation_mask(davis_name, 0, annotations_path, img_dims, flatten=False)
         
@@ -116,7 +116,7 @@ def evaluate_tracking_results(
         all_trials_data = []
         
         # Process each trial
-        for trial_idx, per_trial_list in enumerate(multiple_genparticles_list):
+        for trial_idx, per_trial_list in enumerate(multiple_genmatter_list):
             # per_trial_list: list over frames, each is a dict with 'n_blobs' and 'blob_assignments'
             num_frames = len(per_trial_list)
             
@@ -198,7 +198,7 @@ def evaluate_tracking_results(
 
 def evaluate_single_davis_video(
     davis_name,
-    multiple_genparticles_list,
+    multiple_genmatter_list,
     annotations_path,
     counting_threshold=0,
     img_dims=(520, 960),
@@ -251,7 +251,7 @@ def evaluate_single_davis_video(
     per_frame_matter_weighted_accuracy_all_trials = []
     per_frame_matter_weighted_accuracy_fixed_all_trials = []
 
-    for trial_idx, per_trial_list in enumerate(multiple_genparticles_list):
+    for trial_idx, per_trial_list in enumerate(multiple_genmatter_list):
         num_frames = len(per_trial_list)
         first_frame_assignments = np.array(per_trial_list[0]['blob_assignments'])
         

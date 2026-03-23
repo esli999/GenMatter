@@ -14,12 +14,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import config
 
-from genparticles.datatypes import *
-from genparticles.model_3d import *
-from genparticles.inference import *
-from genparticles.dataloader import *
-from genparticles.utils import *
-from genparticles.evaluation import *
+from genmatter.datatypes import *
+from genmatter.model_3d import *
+from genmatter.inference import *
+from genmatter.dataloader import *
+from genmatter.utils import *
+from genmatter.evaluation import *
 
 model_jsimulate = jax.jit(HDGMM_model_3d.simulate)
 model_jimportance = jax.jit(HDGMM_model_3d.importance)

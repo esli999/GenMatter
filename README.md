@@ -11,8 +11,8 @@ Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TA
 ## Install
 
 ```bash
-conda create -n genparticles python=3.11
-conda activate genparticles
+conda create -n genmatter python=3.11
+conda activate genmatter
 pip install -r requirements.txt
 ```
 
@@ -30,14 +30,14 @@ All paths are set in **`config.py`** (overridable with env vars below).
 
 1. If **`GENMATTER_DAVIS_DIR`** is set → use that.
 2. Else if **`<repo>/assets`** exists as a **real** directory (not a symlink) → use it.
-3. Else → **`$GENMATTER_LEGACY_DATA_ROOT/assets`** (default: `/home/esli/GenParticles_neural_stimulus/assets`).
+3. Else → **`$GENMATTER_LEGACY_DATA_ROOT/assets`** (default: `/home/esli/GenMatter_neural_stimulus/assets`).
 
 So DAVIS usually resolves to  
 `…/assets/tapvid_davis_30_videos_processed/` without symlinks in the repo.
 
 Gestalt does **not** use that tree; it only uses **`genmatter_data/assets/`**.
 
-**Populate defaults** (`run_experiments.py populate-data`): `--source` and `--raft-source` follow the same rule (real `<repo>/assets` and `<repo>/raft_flows`, else legacy root). Notebooks or scripts that pointed at old top-level symlinks (`assets`, `raft_flows`, `final_cvpr_results/…`) should use the real paths under your **`GENMATTER_LEGACY_DATA_ROOT`** or **`GenParticles_NeurIPS`** checkout instead.
+**Populate defaults** (`run_experiments.py populate-data`): `--source` and `--raft-source` follow the same rule (real `<repo>/assets` and `<repo>/raft_flows`, else legacy root). Notebooks or scripts that pointed at old top-level symlinks (`assets`, `raft_flows`, `final_cvpr_results/…`) should use the real paths under your **`GENMATTER_LEGACY_DATA_ROOT`** or **`GenMatter_NeurIPS`** checkout instead.
 
 ### If you already had `genmatter_data/from_thomas/` (old layout)
 
@@ -52,7 +52,7 @@ mv genmatter_data/raft_flows genmatter_data/assets/
 Copies the **minimal** Gestalt file set and writes **trimmed** RAFT npz under `genmatter_data/assets/`:
 
 ```bash
-conda activate genparticles
+conda activate genmatter
 python run_experiments.py populate-data
 # optional: only refresh RAFT
 python run_experiments.py populate-data --raft-only
@@ -103,10 +103,10 @@ Under **`tapvid_davis_30_videos_processed/`** you need:
 
 ## How to run experiments
 
-Use the same conda env you installed into (**JAX / PyTorch / genparticles live there**):
+Use the same conda env you installed into (**JAX / PyTorch / genmatter live there**):
 
 ```bash
-conda activate genparticles
+conda activate genmatter
 cd /path/to/GenMatter   # repo root
 ```
 
@@ -130,7 +130,7 @@ python run_experiments.py cotracker
 **Postprocessing** (after the matching runs have written under `results/`; same env):
 
 ```bash
-conda activate genparticles
+conda activate genmatter
 python run_experiments.py postprocess-gestalt          # + SegAnyMo / FlowSAM paths in config
 python run_experiments.py postprocess-gestalt-ablation
 python run_experiments.py postprocess-davis
@@ -146,7 +146,7 @@ Outputs: `results/postprocessing/*.json` and `*.csv`.
 |---------|------|
 | `GENMATTER_DATA_DIR` | Root for `assets/` subfolder (default `<repo>/genmatter_data`) |
 | `GENMATTER_DAVIS_DIR` | Parent of `tapvid_davis_30_videos_processed/` (overrides auto-resolve) |
-| `GENMATTER_LEGACY_DATA_ROOT` | Fallback when `<repo>/assets` or `<repo>/raft_flows` are missing or symlinks (default `…/GenParticles_neural_stimulus`) |
+| `GENMATTER_LEGACY_DATA_ROOT` | Fallback when `<repo>/assets` or `<repo>/raft_flows` are missing or symlinks (default `…/GenMatter_neural_stimulus`) |
 | `GENMATTER_RAFT_SOURCE_DIR` | Full-length RAFT npz dir for `populate-data` (overrides auto-resolve) |
 | `GENMATTER_RAFT_FLOWS_PATH` | Trimmed RAFT output directory (default `genmatter_data/assets/raft_flows`) |
 | `GENMATTER_RAFT_NUM_FLOW_FRAMES` | Flow frames kept in trimmed RAFT (default `5`) |
@@ -165,7 +165,7 @@ experiments/gestalt/      # Mask-propagation Gestalt
 experiments/davis/        # DINO extract, tracking, subsampling, ablation
 experiments/baselines/    # CoTracker3
 postprocessing/           # Metrics aggregation
-genparticles/             # Core library
+genmatter/                # Core library
 ```
 
 **CoTracker3** weights load from PyTorch Hub on first use.

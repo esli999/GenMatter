@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).parent.resolve()
 
 # Sibling checkout with full ``assets/`` and ``raft_flows/`` (override per machine).
 LEGACY_DATA_ROOT = Path(
-    os.environ.get("GENMATTER_LEGACY_DATA_ROOT", "/home/esli/GenParticles_neural_stimulus")
+    os.environ.get("GENMATTER_LEGACY_DATA_ROOT", "/home/esli/GenMatter_neural_stimulus")
 )
 
 
