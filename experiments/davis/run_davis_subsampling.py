@@ -52,7 +52,7 @@ MEASURE_FPS = True
 VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
 USE_SAM_FRAME0 = True
-SAVE_3WIDE_VIDEO = True  # overridden by davis_run_cli when run as __main__
+SAVE_3WIDE_VIDEO = False  # overridden by davis_run_cli when run as __main__
 
 # Paths
 DAVIS_3D_MOTION_PATH = str(config.DAVIS_3D_MOTION_PATH)

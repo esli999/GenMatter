@@ -39,10 +39,10 @@ def add_save_3wide_video_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--save-3wide-video",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help=(
-            "Write GenMatter 3-wide visualization MP4s under 3wide_videos/ (default: on). "
-            "Pass --no-save-3wide-video to skip encoding and related disk I/O."
+            "Write GenMatter 3-wide visualization MP4s under 3wide_videos/ (default: off). "
+            "Pass --save-3wide-video to enable encoding and disk I/O."
         ),
     )
 
@@ -56,4 +56,4 @@ def configure_experiment_module(
     use_sam = bool(args.use_sam)
     module.USE_SAM_FRAME0 = use_sam
     module.EXPERIMENT_SAVE_DIR = str(sam_dir if use_sam else no_sam_dir)
-    module.SAVE_3WIDE_VIDEO = bool(getattr(args, "save_3wide_video", True))
+    module.SAVE_3WIDE_VIDEO = bool(getattr(args, "save_3wide_video", False))
