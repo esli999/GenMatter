@@ -1,14 +1,13 @@
 """
 Central paths and shared experiment constants for GenMatter.
 
-Gestalt inputs live under ``genmatter_data/assets/`` (see README for the exact
-file tree). DAVIS TAP-Vid data stays under ``<GENMATTER_DAVIS_DIR>/tapvid_davis_30_videos_processed/``.
-RDK psychophysics data lives under ``GENMATTER_RDK_DIR`` (default ``<repo>/assets/RDK``).
-Optional per-stimulus JAX seeds: ``GENMATTER_RDK_REPRO_KEYS_PATH`` or ``reproducibility_keys.json`` in that directory.
+With default ``GENMATTER_DATA_DIR`` (repository root), inputs live under ``<repo>/assets/``:
+``gestalt_stimuli/{from_thomas,raft_flows}/``, ``tapvid_davis_30_videos_processed/``, ``RDK/``.
+See README for layout. Optional per-stimulus JAX seeds: ``GENMATTER_RDK_REPRO_KEYS_PATH`` or
+``reproducibility_keys.json`` under the RDK directory.
 
-**No symlinks required:** if ``<repo>/assets`` or ``<repo>/raft_flows`` are missing
-or are symlinks, set ``GENMATTER_LEGACY_DATA_ROOT`` to a sibling checkout that contains
-those trees (there is no built-in default path).
+If ``<repo>/assets`` or ``<repo>/raft_flows`` are missing or are symlinks, you can set
+``GENMATTER_LEGACY_DATA_ROOT`` to a sibling checkout that contains those trees.
 """
 
 import os
@@ -63,19 +62,24 @@ def _resolve_data_dir() -> Path:
         return Path(os.environ["GENMATTER_DATA_DIR"])
     if os.environ.get("GENMATTER_ASSETS_DIR"):
         return Path(os.environ["GENMATTER_ASSETS_DIR"])
-    return REPO_ROOT / "genmatter_data"
+    return REPO_ROOT
 
 
 GENMATTER_DATA_DIR = _resolve_data_dir()
 
-# Gestalt stimuli + RAFT (populate into this folder, or unzip your bundle here)
+# Gestalt stimuli + RAFT under ``assets/gestalt_stimuli/{from_thomas,raft_flows}``
 GENMATTER_LOCAL_ASSETS = GENMATTER_DATA_DIR / "assets"
-GESTALT_BASE_PATH = GENMATTER_LOCAL_ASSETS / "from_thomas"
+GESTALT_STIMULI_DIR = (
+    Path(os.environ["GENMATTER_GESTALT_STIMULI_DIR"]).expanduser().resolve()
+    if os.environ.get("GENMATTER_GESTALT_STIMULI_DIR")
+    else (GENMATTER_LOCAL_ASSETS / "gestalt_stimuli")
+)
+GESTALT_BASE_PATH = GESTALT_STIMULI_DIR / "from_thomas"
 
-# First N flow frames match ``load_six_frame_gestalt_data`` / HDGMM pairing with 6 depth frames
+# First N flow frames match ``load_six_frame_gestalt_data`` / GenMatter pairing with 6 depth frames
 GESTALT_RAFT_NUM_FLOW_FRAMES = int(os.environ.get("GENMATTER_RAFT_NUM_FLOW_FRAMES", "5"))
 RAFT_FLOWS_PATH = Path(
-    os.environ.get("GENMATTER_RAFT_FLOWS_PATH", GENMATTER_LOCAL_ASSETS / "raft_flows")
+    os.environ.get("GENMATTER_RAFT_FLOWS_PATH", GESTALT_STIMULI_DIR / "raft_flows")
 )
 
 # Scenes / textures used by Gestalt experiments and postprocessing (20 × 7)
@@ -152,7 +156,7 @@ PSYCHOPHYSICS_OUTPUT_DIR = RESULTS_DIR / "psychophysics"
 DAVIS_PARENT_DIR = _resolve_assets_parent()
 DAVIS_BASE = DAVIS_PARENT_DIR / "tapvid_davis_30_videos_processed"
 
-# Populate script defaults (full RAFT + source ``from_thomas`` tree)
+# Populate script defaults (full RAFT + source ``from_thomas`` tree under ``--source``)
 POPULATE_GESTALT_SOURCE_DIR = DAVIS_PARENT_DIR
 POPULATE_FULL_RAFT_SOURCE_DIR = _resolve_full_raft_source_dir()
 DAVIS_3D_MOTION_PATH = DAVIS_BASE / "tapvid_davis_npzs"
