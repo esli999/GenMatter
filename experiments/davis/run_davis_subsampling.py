@@ -52,6 +52,7 @@ MEASURE_FPS = True
 VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
 USE_SAM_FRAME0 = True
+SAVE_3WIDE_VIDEO = True  # overridden by davis_run_cli when run as __main__
 
 # Paths
 DAVIS_3D_MOTION_PATH = str(config.DAVIS_3D_MOTION_PATH)
@@ -662,226 +663,10 @@ def init_gibbs_sweep_dino(key, genmatter_state, num_sweeps=30):
 # Evaluation Functions
 # ============================================================================
 #
-# Metrics (DAVIS):
-# - Discretized particle FP/FN rates (compute_error_rates) for diagnostics / plots.
-# - Primary comparison metric: matter-weighted recall, precision, and Jaccard with
-#   frame-0 blob weights (evaluate_single_davis_video).
+# Primary comparison metric: matter-weighted recall, precision, and Jaccard with
+# frame-0 blob weights (evaluate_single_davis_video).
 # ============================================================================
 
-
-def compute_error_rates(tracking_data, segmentation_masks, img_dims,
-                       blob_counting_threshold=0, focal_length=520.0, force_below_count_thresh_as_outlier=False,
-                       subsampled_indices=None, is_mask_subsampled=False):
-    """
-    Compute PARTICLE-BASED false positive, false negative rates, Jaccard score, and accuracy over time.
-
-    This tracks discrete particle location changes by projecting particle means to 2D,
-    NOT fractional particle contributions. See section comment above for the difference between 
-    particle-based and particle-count metrics.
-    
-    Object particles are determined SOLELY by whether they project onto mask pixels in frame 0,
-    NOT by hyperblob assignment.
-    
-    Args:
-        force_below_count_thresh_as_outlier: If True, particles below counting threshold are 
-                                           treated as outliers and excluded from all metrics.
-                                           If False (default), they are treated as background particles.
-    """
-    fx = fy = focal_length
-    cx = img_dims[1] / 2.0
-    cy = img_dims[0] / 2.0
-
-    # Frame 0 setup
-    frame0 = tracking_data[0]
-    blob_assignments_frame0 = frame0['blob_assignments']
-    blob_means_frame0 = frame0['blob_means']
-    n_blobs_frame0 = frame0['n_blobs']
-    gt_mask_frame0 = segmentation_masks[0]
-
-    blob_pixel_counts_frame0 = np.bincount(
-        blob_assignments_frame0[blob_assignments_frame0 < n_blobs_frame0],
-        minlength=n_blobs_frame0
-    )
-    significant_blobs = np.where(blob_pixel_counts_frame0 >= blob_counting_threshold)[0]
-
-    if force_below_count_thresh_as_outlier:
-        # Only consider significant blobs, ignore below-threshold particles entirely
-        blobs_to_consider = significant_blobs
-    else:
-        # Original behavior: consider all blobs
-        blobs_to_consider = np.arange(n_blobs_frame0)
-
-    print(f"is_mask_subsampled? ~~~~~~~~~~~> : {is_mask_subsampled}")
-
-    if is_mask_subsampled:
-        H, W = img_dims
-        xs_sub = np.array(subsampled_indices) % W
-        ys_sub = np.array(subsampled_indices) // W
-        # helper to get nearest sampled mask value from a projected (x, y)
-        def nearest_sampled_mask_value(mask_vec, x, y):
-            # compute index in the sliced mask (aligned with subsampled_indices order)
-            dx = xs_sub - x
-            dy = ys_sub - y
-            idx = int(np.argmin(dx * dx + dy * dy))
-            return bool(mask_vec[idx])
-
-    # Project blob means to 2D and determine object vs background particles based on mask
-    x_2d = (blob_means_frame0[:, 0] / (blob_means_frame0[:, 2] + 1e-8)) * fx + cx
-    y_2d = (blob_means_frame0[:, 1] / (blob_means_frame0[:, 2] + 1e-8)) * fy + cy
-    x_2d = np.clip(x_2d.astype(int), 0, img_dims[1] - 1)
-    y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
-
-    object_blobs_frame0 = []
-    background_blobs_frame0 = []
-
-    for blob_idx in blobs_to_consider:
-        if not is_mask_subsampled:
-            pixel_idx = y_2d[blob_idx] * img_dims[1] + x_2d[blob_idx]
-            is_on_mask = pixel_idx < len(gt_mask_frame0) and gt_mask_frame0[pixel_idx]
-        else:
-            is_on_mask = nearest_sampled_mask_value(gt_mask_frame0, x_2d[blob_idx], y_2d[blob_idx])
-        
-        if is_on_mask:
-            object_blobs_frame0.append(blob_idx)
-        else:
-            background_blobs_frame0.append(blob_idx)
-
-    object_blobs_frame0 = np.array(object_blobs_frame0)
-    background_blobs_frame0 = np.array(background_blobs_frame0)
-    n_object_blobs = len(object_blobs_frame0)
-    n_background_blobs = len(background_blobs_frame0)
-
-    # Track over time
-    false_negative_rates = []
-    false_positive_rates = []
-    jaccard_scores = []
-    accuracies = []
-
-    for frame_idx in range(len(tracking_data)):
-        frame = tracking_data[frame_idx]
-        blob_means = frame['blob_means']
-        n_blobs = frame['n_blobs']
-        gt_mask = segmentation_masks[frame_idx]
-
-        if not is_mask_subsampled:
-            x_2d = (blob_means[:, 0] / (blob_means[:, 2] + 1e-8)) * fx + cx
-            y_2d = (blob_means[:, 1] / (blob_means[:, 2] + 1e-8)) * fy + cy
-            x_2d = np.clip(x_2d.astype(int), 0, img_dims[1] - 1)
-            y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
-            pixel_indices = y_2d * img_dims[1] + x_2d
-
-        tp_count = 0
-        if not is_mask_subsampled:
-            for blob_idx in object_blobs_frame0:
-                if blob_idx < n_blobs:
-                    pixel_idx = pixel_indices[blob_idx]
-                    if pixel_idx < len(gt_mask) and gt_mask[pixel_idx]:
-                        tp_count += 1
-        else:
-            for blob_idx in object_blobs_frame0:
-                if blob_idx < n_blobs:
-                    if nearest_sampled_mask_value(gt_mask, x_2d[blob_idx], y_2d[blob_idx]):
-                        tp_count += 1
-
-        fn_count = n_object_blobs - tp_count
-        fn_rate = (fn_count / n_object_blobs) * 100 if n_object_blobs > 0 else 0.0
-
-        fp_count = 0
-        if not is_mask_subsampled:
-            for blob_idx in background_blobs_frame0:
-                if blob_idx < n_blobs:
-                    pixel_idx = pixel_indices[blob_idx]
-                    if pixel_idx < len(gt_mask) and gt_mask[pixel_idx]:
-                        fp_count += 1
-        else:
-            for blob_idx in background_blobs_frame0:
-                if blob_idx < n_blobs:
-                    if nearest_sampled_mask_value(gt_mask, x_2d[blob_idx], y_2d[blob_idx]):
-                        fp_count += 1
-
-        fp_rate = (fp_count / n_background_blobs) * 100 if n_background_blobs > 0 else 0.0
-
-        # True negatives: background particles that stayed off mask
-        tn_count = n_background_blobs - fp_count
-
-        # Compute accuracy: (TN + TP) / (TP + TN + FP + FN)
-        total_particles = n_object_blobs + n_background_blobs
-        accuracy = ((tn_count + tp_count) / total_particles) * 100 if total_particles > 0 else 100.0
-
-        # Compute Jaccard score (IoU for particles)
-        # True positives: object particles still on mask
-        # False positives: background particles that entered mask
-        # False negatives: object particles that left mask
-        intersection = tp_count
-        union = tp_count + fp_count + fn_count
-        jaccard = (intersection / union) if union > 0 else 1.0  # Perfect score if no particles
-
-        false_negative_rates.append(fn_rate)
-        false_positive_rates.append(fp_rate)
-        jaccard_scores.append(jaccard)
-        accuracies.append(accuracy)
-
-    return {
-        'false_negative_rates': false_negative_rates,
-        'false_positive_rates': false_positive_rates,
-        'jaccard_scores': jaccard_scores,
-        'accuracies': accuracies,
-        'mean_fn_rate': np.mean(false_negative_rates),
-        'mean_fp_rate': np.mean(false_positive_rates),
-        'mean_jaccard': np.mean(jaccard_scores),
-        'mean_accuracy': np.mean(accuracies),
-        'n_object_blobs': n_object_blobs,
-        'n_background_blobs': n_background_blobs
-    }
-
-def plot_error_rates(error_results, video_name, save_path):
-    """Plot and save error rate visualization."""
-    fn_rates = error_results['false_negative_rates']
-    fp_rates = error_results['false_positive_rates']
-    jaccard_scores = error_results['jaccard_scores']
-    accuracies = error_results['accuracies']
-    mean_fn = error_results['mean_fn_rate']
-    mean_fp = error_results['mean_fp_rate']
-    mean_jaccard = error_results['mean_jaccard']
-    mean_accuracy = error_results['mean_accuracy']
-
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 15))
-    
-    # Top plot: Error rates
-    ax1.plot(range(len(fn_rates)), fn_rates, linewidth=2, color='red',
-            label=f'False Negative Rate (mean: {mean_fn:.2f}%)', alpha=0.8)
-    ax1.plot(range(len(fp_rates)), fp_rates, linewidth=2, color='blue',
-            label=f'False Positive Rate (mean: {mean_fp:.2f}%)', alpha=0.8)
-    ax1.set_xlabel('Frame', fontsize=12)
-    ax1.set_ylabel('Rate (%)', fontsize=12)
-    ax1.set_title(f'{video_name} - Blob Tracking Error Rates', fontsize=14, fontweight='bold')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend(fontsize=11)
-    ax1.set_ylim([0, 105])
-    
-    # Middle plot: Jaccard score
-    ax2.plot(range(len(jaccard_scores)), jaccard_scores, linewidth=2, color='green',
-            label=f'Jaccard Score (mean: {mean_jaccard:.3f})', alpha=0.8)
-    ax2.set_xlabel('Frame', fontsize=12)
-    ax2.set_ylabel('Jaccard Score', fontsize=12)
-    ax2.set_title(f'{video_name} - Particle Jaccard Score (IoU)', fontsize=14, fontweight='bold')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend(fontsize=11)
-    ax2.set_ylim([0, 1.05])
-    
-    # Bottom plot: Accuracy
-    ax3.plot(range(len(accuracies)), accuracies, linewidth=2, color='purple',
-            label=f'Accuracy (mean: {mean_accuracy:.2f}%)', alpha=0.8)
-    ax3.set_xlabel('Frame', fontsize=12)
-    ax3.set_ylabel('Accuracy (%)', fontsize=12)
-    ax3.set_title(f'{video_name} - Particle Tracking Accuracy', fontsize=14, fontweight='bold')
-    ax3.grid(True, alpha=0.3)
-    ax3.legend(fontsize=11)
-    ax3.set_ylim([0, 105])
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
 
 def create_3wide_video(tracking_data, video_name, rgb_path, img_dims, segmentation_masks,
                        num_blobs, save_path, subsampled_indices=None, is_subsampled=False,
@@ -904,7 +689,7 @@ def create_3wide_video(tracking_data, video_name, rgb_path, img_dims, segmentati
 
     num_frames = min(len(tracking_data), len(rgb_files))
 
-    # Determine object particles from frame 0 using segmentation mask (like compute_error_rates)
+    # Determine object particles from frame 0 using segmentation mask overlap
     frame0 = tracking_data[0]
     blob_assignments_frame0 = frame0['blob_assignments']
     n_blobs_frame0 = NUM_BLOBS
@@ -919,7 +704,7 @@ def create_3wide_video(tracking_data, video_name, rgb_path, img_dims, segmentati
     )
     
     # Determine which blobs are object vs background based on mask overlap
-    # Use the same logic as compute_error_rates: check which pixels assigned to each blob overlap with mask
+    # Pixels assigned to each blob vs mask overlap
     object_blobs_frame0 = set()
     background_blobs_frame0 = set()
     
@@ -1362,25 +1147,15 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             }
             tracking_data.append(frame_data)
 
-        # Evaluate
-        print("Computing error rates...")
+        # Segmentation masks for 3-wide video / viz
         segmentation_masks = []
         for frame_idx in range(len(tracking_data)):
             seg_mask = get_segmentation_mask(
                 video_name, frame_idx, DAVIS_SEGMASKS_PATH, img_dims=img_dims, flatten=True
             )
-            # if subsampled_indices is not None:
-            #     seg_mask = seg_mask[subsampled_indices]
             segmentation_masks.append(seg_mask)
 
-        # is_mask_subsampled = subsampling_percentage < 100
-        error_results = compute_error_rates(
-            tracking_data, segmentation_masks, img_dims,
-                BLOB_COUNTING_THRESHOLD, FOCAL_LENGTH, force_below_count_thresh_as_outlier=True,
-                subsampled_indices=None, is_mask_subsampled= False
-            )
-
-        # Get particle-count accuracy metrics
+        # Matter-weighted DAVIS metrics
         all_results = {video_name: [tracking_data]}
         experiment_metrics, best_visualization_data = evaluate_single_davis_video(
             davis_name=video_name,
@@ -1397,7 +1172,6 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
 
         result = {
             'video_name': video_name,
-            'error_results': error_results,
             'pixel_metrics': experiment_metrics,
             'tracking_data': tracking_data,
             'segmentation_masks': segmentation_masks,
@@ -1408,72 +1182,16 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         }
 
         print(f"Completed: {video_name}")
-        
+
         if MEASURE_FPS and fps is not None:
             print(f"  FPS: {fps:.2f} frames/second")
-        
-        print(f"\n  1. PARTICLE-BASED DIAGNOSTICS (projected particle means; FN/FP rates):")
-        print(f"    Mean FN Rate: {error_results['mean_fn_rate']:.2f}%  (object particles leaving mask)")
-        print(f"    Mean FP Rate: {error_results['mean_fp_rate']:.2f}%  (background particles entering mask)")
-        print(f"    Mean Accuracy: {error_results['mean_accuracy']:.2f}%  ((TN + TP) / (TP + TN + FP + FN))")
 
-        print(f"\n  2. MATTER-WEIGHTED (frame-0 blob weights) — primary DAVIS metric:")
+        print(f"\n  MATTER-WEIGHTED (frame-0 blob weights) — primary DAVIS metric:")
         pm = experiment_metrics
         print(f"    Recall:     {pm['avg_matter_weighted_recall_fixed']:.3f}")
         print(f"    Precision:  {pm['avg_matter_weighted_precision_fixed']:.3f}")
         print(f"    Jaccard:    {pm['avg_matter_weighted_jaccard_fixed']:.3f}")
         print(f"    Accuracy:   {pm['avg_matter_weighted_accuracy_fixed']:.3f}")
-
-        # Diagnostic checks for adversarial cases
-        print(f"\n  Diagnostic Checks (detecting potential metric gaming):")
-
-        # 1. Weight Entropy (frame 0)
-        frame0_blob_weights = np.array(tracking_data[0]['blob_weights'])
-        weight_entropy = -np.sum(frame0_blob_weights * np.log(frame0_blob_weights + 1e-10))
-        max_entropy = np.log(len(frame0_blob_weights))
-        normalized_entropy = weight_entropy / max_entropy
-        print(f"    Weight Entropy:      {normalized_entropy:.3f}  (if < 0.5, weights concentrated; 1.0 = uniform)")
-        if normalized_entropy < 0.5:
-            print(f"    ⚠️  WARNING: Weights are concentrated on few particles (potential gaming)")
-
-        # 3. Spatial Coverage (reference particles)
-        frame0_blob_means = np.array(tracking_data[0]['blob_means'])
-        frame0_hyperblob_assignments = np.array(tracking_data[0]['hyperblob_assignments'])
-        frame0_blob_assignments = np.array(tracking_data[0]['blob_assignments'])
-        
-        # Handle reshaping based on whether subsampling was used
-        if result.get('subsampled_indices') is None:
-            # No subsampling: reshape to image dimensions if needed
-            if frame0_blob_assignments.ndim == 1:
-                frame0_blob_assignments = frame0_blob_assignments.reshape(result['img_dims'])
-        else:
-            # Subsampling was used: keep as 1D (already subsampled)
-            if frame0_blob_assignments.ndim > 1:
-                frame0_blob_assignments = frame0_blob_assignments.flatten()
-        
-        frame0_n_blobs = tracking_data[0]['n_blobs']
-
-        # Get reference particles (same logic as evaluation)
-        blob_pixel_counts = np.bincount(
-            frame0_blob_assignments.flatten()[frame0_blob_assignments.flatten() < frame0_n_blobs],
-            minlength=frame0_n_blobs
-        )
-        reference_particle_indices = np.where(blob_pixel_counts >= BLOB_COUNTING_THRESHOLD)[0]
-
-        if len(reference_particle_indices) > 1:
-            ref_positions = frame0_blob_means[reference_particle_indices]
-            spatial_std = np.std(ref_positions, axis=0)
-            avg_spatial_std = np.mean(spatial_std)
-            print(f"    Spatial Std Dev:     {avg_spatial_std:.3f}  (particles spread; low values = clustered)")
-            if avg_spatial_std < 0.1:
-                print(f"    ⚠️  WARNING: Reference particles are highly clustered (potential gaming)")
-        else:
-            print(f"    Spatial Std Dev:     N/A  (only {len(reference_particle_indices)} reference particle)")
-
-        # 4. Number of reference particles
-        print(f"    Ref Particles:       {len(reference_particle_indices)}  (particles used for evaluation)")
-        if len(reference_particle_indices) < 10:
-            print(f"    ⚠️  WARNING: Very few reference particles (metric may be fragile)")
 
         # Clean up large intermediate variables before returning
         # These are no longer needed after creating the result
@@ -1518,6 +1236,7 @@ if __name__ == "__main__":
 
     _parser = argparse.ArgumentParser(description="DAVIS DINO subsampling tradeoff")
     davis_run_cli.add_use_sam_args(_parser)
+    davis_run_cli.add_save_3wide_video_args(_parser)
     _args = _parser.parse_args()
     davis_run_cli.configure_experiment_module(sys.modules[__name__], _args, "subsampling")
 
@@ -1529,6 +1248,7 @@ if __name__ == "__main__":
     print(f"{'='*80}")
     print(f"DINO SUBSAMPLING EXPERIMENT - Processing {len(VIDEO_NAMES)} videos")
     print(f"  SAM frame-0 init: {USE_SAM_FRAME0}")
+    print(f"  Save 3-wide videos: {SAVE_3WIDE_VIDEO}")
     print(f"  Output directory: {EXPERIMENT_SAVE_DIR}")
     if MEASURE_FPS:
         print(f"FPS measurement: ENABLED")
@@ -1554,61 +1274,24 @@ if __name__ == "__main__":
             if result is not None:
                 all_results.append(result)
 
-                # Create subdirectories for outputs
                 base_dir = run_save_dir if ('subsampling_percentage' in result) else EXPERIMENT_SAVE_DIR
-                plots_dir = os.path.join(base_dir, "error_rate_plots")
-                videos_dir = os.path.join(base_dir, "3wide_videos")
-                os.makedirs(plots_dir, exist_ok=True)
-                os.makedirs(videos_dir, exist_ok=True)
 
-                # Save error rate plot
-                plot_path = os.path.join(plots_dir, f"{video_name}_error_rates.png")
-                plot_error_rates(result['error_results'], video_name, plot_path)
-                print(f"Saved error rate plot: {plot_path}")
-
-                # Save 3-wide video (TEMPORARILY DISABLED)
-                video_path = os.path.join(videos_dir, f"{video_name}_3wide_synchronized.mp4")
-                # is_subsampled = result.get('subsampling_percentage') < 100
-                create_3wide_video(
-                    result['tracking_data'], video_name, DAVIS_RGB_PATH,
-                    result['img_dims'], result['segmentation_masks'],
-                    NUM_BLOBS, video_path, subsampled_indices=None, is_subsampled=False
-                )
-                print(f"Saved 3-wide video: {video_path}")
-
-                # Compute diagnostics for JSON
-                tracking_data = result['tracking_data']
-                frame0_blob_weights = np.array(tracking_data[0]['blob_weights'])
-                weight_entropy = -np.sum(frame0_blob_weights * np.log(frame0_blob_weights + 1e-10))
-                max_entropy = np.log(len(frame0_blob_weights))
-                normalized_entropy = float(weight_entropy / max_entropy)
-
-                frame0_blob_means = np.array(tracking_data[0]['blob_means'])
-                frame0_blob_assignments_vec = np.array(tracking_data[0]['blob_assignments'])
-                frame0_n_blobs = tracking_data[0]['n_blobs']
-                blob_pixel_counts = np.bincount(
-                    frame0_blob_assignments_vec[frame0_blob_assignments_vec < frame0_n_blobs],
-                    minlength=frame0_n_blobs
-                )
-                reference_particle_indices = np.where(blob_pixel_counts >= BLOB_COUNTING_THRESHOLD)[0]
-
-                if len(reference_particle_indices) > 1:
-                    ref_positions = frame0_blob_means[reference_particle_indices]
-                    spatial_std = np.std(ref_positions, axis=0)
-                    avg_spatial_std = float(np.mean(spatial_std))
-                else:
-                    avg_spatial_std = None
+                if SAVE_3WIDE_VIDEO:
+                    videos_dir = os.path.join(base_dir, "3wide_videos")
+                    os.makedirs(videos_dir, exist_ok=True)
+                    video_path = os.path.join(videos_dir, f"{video_name}_3wide_synchronized.mp4")
+                    create_3wide_video(
+                        result['tracking_data'], video_name, DAVIS_RGB_PATH,
+                        result['img_dims'], result['segmentation_masks'],
+                        NUM_BLOBS, video_path, subsampled_indices=None, is_subsampled=False
+                    )
+                    print(f"Saved 3-wide video: {video_path}")
 
                 pm = result['pixel_metrics']
+                tracking_data = result['tracking_data']
 
                 all_accuracies[video_name] = {
                     'pixel_metrics': pm,
-
-                    'particle_fn_rate': result['error_results']['mean_fn_rate'],
-                    'particle_fp_rate': result['error_results']['mean_fp_rate'],
-                    'particle_accuracy': result['error_results']['mean_accuracy'],
-                    'n_object_particles': result['error_results']['n_object_blobs'],
-                    'n_background_particles': result['error_results']['n_background_blobs'],
 
                     'particle_count_matter_fixed_recall': pm['avg_matter_weighted_recall_fixed'],
                     'particle_count_matter_fixed_precision': pm['avg_matter_weighted_precision_fixed'],
@@ -1616,15 +1299,6 @@ if __name__ == "__main__":
                     'particle_count_matter_fixed_accuracy': pm['avg_matter_weighted_accuracy_fixed'],
 
                     'fps': result.get('fps'),
-
-                    'diagnostics': {
-                        'weight_entropy_normalized': normalized_entropy,
-                        'spatial_std_dev': avg_spatial_std,
-                        'n_reference_particles': int(len(reference_particle_indices)),
-                        'warning_weight_concentration': normalized_entropy < 0.5,
-                        'warning_spatial_clustering': avg_spatial_std is not None and avg_spatial_std < 0.1,
-                        'warning_few_particles': len(reference_particle_indices) < 10
-                    }
                 }
 
                 # Save per-run JSON
@@ -1656,14 +1330,7 @@ if __name__ == "__main__":
                     del tracking_data
                 except NameError:
                     pass
-                
-                # Clean up local variables used for diagnostics
-                try:
-                    del frame0_blob_weights, frame0_blob_means, frame0_blob_assignments_vec
-                    del blob_pixel_counts, reference_particle_indices
-                except NameError:
-                    pass
-                
+
                 # Force garbage collection after processing result
                 gc.collect()
 
@@ -1688,8 +1355,11 @@ if __name__ == "__main__":
         all_accuracies_from_json = all_accuracies
 
     # Filter out incomplete results (videos that failed to process)
-    valid_results = {k: v for k, v in all_accuracies_from_json.items()
-                    if 'particle_fn_rate' in v and 'particle_count_matter_fixed_jaccard' in v}
+    valid_results = {
+        k: v
+        for k, v in all_accuracies_from_json.items()
+        if 'particle_count_matter_fixed_jaccard' in v
+    }
 
     print(f"\n{'='*80}")
     print(f"SUMMARY - {len(valid_results)} Videos")
@@ -1703,9 +1373,6 @@ if __name__ == "__main__":
     #     print("⚠️  No valid results found in JSON file. Cannot compute aggregate statistics.")
     #     return
     
-    particle_fn_rates = [m['particle_fn_rate'] for m in valid_results.values()]
-    particle_fp_rates = [m['particle_fp_rate'] for m in valid_results.values()]
-
     particle_count_matter_fixed_recall = [m['particle_count_matter_fixed_recall'] for m in valid_results.values()]
     particle_count_matter_fixed_precision = [m['particle_count_matter_fixed_precision'] for m in valid_results.values()]
     particle_count_matter_fixed_jaccard = [m['particle_count_matter_fixed_jaccard'] for m in valid_results.values()]
@@ -1716,11 +1383,7 @@ if __name__ == "__main__":
 
     print(f"AGGREGATE STATISTICS ACROSS ALL VIDEOS:")
 
-    print(f"\n  1. PARTICLE-MEAN FN/FP (diagnostic):")
-    print(f"    Mean FN Rate:            {np.mean(particle_fn_rates):.2f}% ± {np.std(particle_fn_rates):.2f}%")
-    print(f"    Mean FP Rate:            {np.mean(particle_fp_rates):.2f}% ± {np.std(particle_fp_rates):.2f}%")
-
-    print(f"\n  2. MATTER-WEIGHTED FIXED (primary DAVIS metric):")
+    print(f"\n  MATTER-WEIGHTED FIXED (primary DAVIS metric):")
     print(f"    Recall:                  {np.mean(particle_count_matter_fixed_recall):.3f} ± {np.std(particle_count_matter_fixed_recall):.3f}")
     print(f"    Precision:               {np.mean(particle_count_matter_fixed_precision):.3f} ± {np.std(particle_count_matter_fixed_precision):.3f}")
     print(f"    Jaccard:                 {np.mean(particle_count_matter_fixed_jaccard):.3f} ± {np.std(particle_count_matter_fixed_jaccard):.3f}")
@@ -1740,12 +1403,8 @@ if __name__ == "__main__":
 
     for video_name, metrics in valid_results.items():
         print(f"  {video_name}:")
-        
-        print(f"    1. Particle-mean FN/FP (diagnostic):")
-        print(f"      FN Rate:                 {metrics['particle_fn_rate']:.2f}%")
-        print(f"      FP Rate:                 {metrics['particle_fp_rate']:.2f}%")
 
-        print(f"\n    2. Matter-weighted fixed (primary):")
+        print(f"    Matter-weighted fixed:")
         print(f"      Recall:                  {metrics['particle_count_matter_fixed_recall']:.3f}")
         print(f"      Precision:               {metrics['particle_count_matter_fixed_precision']:.3f}")
         print(f"      Jaccard:                 {metrics['particle_count_matter_fixed_jaccard']:.3f}")

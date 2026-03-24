@@ -1,8 +1,8 @@
 """DAVIS tracking postprocessing: compare GenMatter, CoTracker, and subsampling curves.
 
 Loads per-video JSON results from DAVIS tracking (SAM init by default), SAM and
-no-SAM subsampling runs, and CoTracker.  Extracts **matter-weighted Jaccard (fixed
-frame-0 weights)** as the GenMatter metric, plus FPS and particle FP/FN rates, aggregates
+no-SAM subsampling runs, and CoTracker.  Extracts **matter-weighted recall, precision,
+and Jaccard (fixed frame-0 weights)** plus FPS as the GenMatter metrics, aggregates
 across videos, and writes:
 
 - results/postprocessing/davis_comparison.json   (all methods side-by-side)
@@ -187,21 +187,12 @@ def _extract_dino_metrics(data: dict) -> dict[str, Any]:
     )
 
     fps = data.get("fps") or pm.get("fps_mean")
-    fn_rate = data.get("mean_fn_rate") or data.get("particle_fn_rate")
-    fp_rate = data.get("mean_fp_rate") or data.get("particle_fp_rate")
-
-    n_obj = data.get("n_object_blobs") or data.get("n_object_particles", 0)
-    n_bg = data.get("n_background_blobs") or data.get("n_background_particles", 0)
 
     return {
         "matter_weighted_jaccard_fixed": _to_float(matter_jaccard_fixed),
         "matter_weighted_recall_fixed": _to_float(matter_recall_fixed),
         "matter_weighted_precision_fixed": _to_float(matter_precision_fixed),
         "fps": _to_float(fps),
-        "fn_rate": _to_float(fn_rate),
-        "fp_rate": _to_float(fp_rate),
-        "n_object_particles": int(n_obj) if n_obj else 0,
-        "n_background_particles": int(n_bg) if n_bg else 0,
     }
 
 
@@ -292,19 +283,6 @@ def build_comparison(
             ct_precision = ct.get("mean_precision", float("nan"))
             ct_f1 = ct.get("mean_f1", float("nan"))
 
-        dino_fn_rate = dino.get("fn_rate", float("nan"))
-        dino_fp_rate = dino.get("fp_rate", float("nan"))
-        dino_n_obj = dino.get("n_object_particles", 0)
-        dino_n_bg = dino.get("n_background_particles", 0)
-        if not np.isnan(dino_fn_rate) and not np.isnan(dino_fp_rate):
-            dino_fn_frac = dino_fn_rate / 100.0
-            dino_fp_frac = dino_fp_rate / 100.0
-            dino_p_recall, dino_p_precision, _ = compute_particle_f1(
-                dino_fn_frac, dino_fp_frac, dino_n_obj, dino_n_bg
-            )
-        else:
-            dino_p_recall = dino_p_precision = float("nan")
-
         row: dict[str, Any] = {
             "video": video,
             "cotracker_jaccard": ct.get("mean_jaccard", float("nan")),
@@ -322,11 +300,7 @@ def build_comparison(
             "dino_matter_precision_fixed": dino.get(
                 "matter_weighted_precision_fixed", float("nan")
             ),
-            "dino_particle_recall": dino_p_recall,
-            "dino_particle_precision": dino_p_precision,
             "dino_fps": dino.get("fps", float("nan")),
-            "dino_fn_rate": dino.get("fn_rate", float("nan")),
-            "dino_fp_rate": dino.get("fp_rate", float("nan")),
         }
         rows.append(row)
 
