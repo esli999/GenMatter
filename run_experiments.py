@@ -37,7 +37,7 @@ COMMANDS = {
     "rdk-preprocess": "preprocessing/random_dot_kinematograms/run_rdk_preprocess.py",
     "postprocess-psychophysics-correlation": "postprocessing/postprocess_psychophysics_correlation.py",
     "postprocess-gestalt": "postprocessing/postprocess_gestalt.py",
-    "postprocess-gestalt-ablation": "postprocessing/postprocess_gestalt_ablation.py",
+    "postprocess-gestalt-ablation": "postprocessing/postprocess_gestalt.py",
     "postprocess-davis": "postprocessing/postprocess_davis.py",
 }
 

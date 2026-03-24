@@ -241,6 +241,10 @@ def main() -> int:
         if not inp.is_file():
             print(f"Error: not found: {inp}", file=sys.stderr)
             return 1
+        print("=" * 80)
+        print("Psychophysics correlation (single benchmark)")
+        print(f"  Input: {inp}")
+        print("=" * 80)
         out_arg = Path(args.output).resolve() if args.output else None
         try:
             out = _render_correlation_plot(inp, out_arg, args.dpi)
@@ -252,6 +256,13 @@ def main() -> int:
 
     psych_dir = args.psychophysics_dir.resolve()
     paths = _discover_benchmark_jsons(psych_dir)
+    print("=" * 80)
+    print("Psychophysics correlation (RDK benchmarks)")
+    print(f"  Scanning: {psych_dir}")
+    print(f"  Found {len(paths)} file(s): {[p.name for p in paths]}")
+    print(f"  Output PNGs: {config.POSTPROCESSING_OUTPUT_DIR}/psychophysics_correlation_*.png")
+    print("=" * 80)
+    print()
     if not paths:
         print(
             f"No *_benchmark.json files under {psych_dir}",

@@ -237,7 +237,9 @@ def _safe_float(x):
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+
+def run_gestalt_ablation_postprocess() -> bool:
+    """Compare baseline vs depth-ablation GenMatter. Returns True if analysis ran."""
     np.random.seed(RANDOM_SEED)
 
     baseline_dir = str(config.GESTALT_OUTPUT_DIR)
@@ -245,12 +247,33 @@ def main() -> None:
     output_dir = config.POSTPROCESSING_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"Gestalt ablation comparison")
+    any_combo = False
+    for scene in GESTALT_SCENES:
+        for texture in GESTALT_TEXTURES:
+            if os.path.exists(os.path.join(baseline_dir, scene, texture, "run_0")) or os.path.exists(
+                os.path.join(ablation_dir, scene, texture, "run_0")
+            ):
+                any_combo = True
+                break
+        if any_combo:
+            break
+
+    if not any_combo:
+        print("\n" + "=" * 80)
+        print("Skipping Gestalt depth-ablation comparison (no run_0 under baseline or ablation).")
+        print(f"  Baseline: {baseline_dir}")
+        print(f"  Ablation: {ablation_dir}")
+        print("=" * 80)
+        return False
+
+    print("\n" + "=" * 80)
+    print("Gestalt depth-ablation comparison (baseline vs depth)")
     print(f"  Scenes:   {len(GESTALT_SCENES)}")
     print(f"  Textures: {len(GESTALT_TEXTURES)}")
     print(f"  Baseline: {baseline_dir}")
     print(f"  Ablation: {ablation_dir}")
     print(f"  GT masks: {config.GESTALT_BASE_PATH}")
+    print("=" * 80)
     print()
 
     # ------------------------------------------------------------------
@@ -430,6 +453,7 @@ def main() -> None:
     # Print summary table to stdout
     # ------------------------------------------------------------------
     _print_summary(summary)
+    return True
 
 
 def _metrics_summary(all_results: list[dict], key: str) -> dict | None:
@@ -503,6 +527,10 @@ def _print_summary(summary: dict) -> None:
             print(f"{row['texture']:<15} {row['n']:>4} {bl_str:>10} {ab_str:>10} {d_str:>8}")
 
     print()
+
+
+def main() -> None:
+    run_gestalt_ablation_postprocess()
 
 
 if __name__ == "__main__":

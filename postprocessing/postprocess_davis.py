@@ -527,6 +527,18 @@ def main() -> None:
     out_dir = config.POSTPROCESSING_OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    print("=" * 80)
+    print("DAVIS postprocessing")
+    print("=" * 80)
+    print("Loading experiment outputs from:")
+    print(f"  CoTracker baseline:     {config.COTRACKER_OUTPUT_DIR}")
+    print(f"  DINO tracking (main): {config.DAVIS_TRACKING_OUTPUT_DIR}")
+    print(f"  DINO subsampling (SAM): {config.DAVIS_SUBSAMPLING_OUTPUT_DIR}")
+    print(f"  DINO ablation (no SAM): {config.DAVIS_ABLATION_OUTPUT_DIR}")
+    print(f"Writing: {out_dir}  (davis_comparison.json, davis_subsampling_tradeoff.json, davis_results.csv)")
+    print("=" * 80)
+    print()
+
     # ---- Load data --------------------------------------------------------
     print("Loading results...")
 

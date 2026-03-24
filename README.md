@@ -63,6 +63,8 @@ uv run python scripts/download_url_list.py -P assets -c -i scripts/gestalt_stimu
 uv run python scripts/download_url_list.py -P assets -c -i scripts/tapvid_davis_urls.txt
 ```
 
+Expect roughly **5–7 minutes** download time on a typical connection. The list begins with **large npz files**, so the progress bar (pegged to number of files) looks slow at first; but picks up later rapidly.
+
 **Option B — Download DAVIS + preprocess** (downloads DAVIS, then builds npzs, DINO, SAM, 3D motion)
 
 ```bash
@@ -107,7 +109,7 @@ uv run python run_experiments.py davis-subsampling
 uv run python run_experiments.py davis-ablation
 uv run python run_experiments.py cotracker
 
-# RDK (after RDK wget or rdk-preprocess under [Data](#data))
+# RDK
 uv run python run_experiments.py psychophysics-benchmark
 uv run python run_experiments.py psychophysics-rdk-ablation-fixed
 uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
@@ -116,8 +118,7 @@ uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
 **Postprocessing** (after the matching runs have written under `results/`):
 
 ```bash
-uv run python run_experiments.py postprocess-gestalt          # + SegAnyMo / FlowSAM paths in config
-uv run python run_experiments.py postprocess-gestalt-ablation
+uv run python run_experiments.py postprocess-gestalt
 uv run python run_experiments.py postprocess-davis
 uv run python run_experiments.py postprocess-psychophysics-correlation
 ```

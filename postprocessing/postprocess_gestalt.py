@@ -1,7 +1,7 @@
-"""Gestalt segmentation postprocessing: evaluate GenMatter, SegAnyMo, and FlowSAM.
+"""Gestalt postprocessing: main comparison (GenMatter vs SegAnyMo vs FlowSAM) and
+optional depth-ablation comparison (baseline vs depth-ablation runs).
 
-Computes probe-point accuracy, Jaccard, precision, recall, and F1 for each
-scene/texture/frame combination, then writes per-combo and summary results.
+Writes gestalt_*.json/csv and gestalt_ablation_comparison.* under the postprocessing output dir.
 """
 
 import csv
@@ -16,8 +16,12 @@ from PIL import Image
 from scipy import stats
 from scipy.ndimage import zoom
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
+
+from postprocess_gestalt_ablation import run_gestalt_ablation_postprocess  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -357,6 +361,25 @@ def main() -> None:
     output_dir = Path(config.POSTPROCESSING_OUTPUT_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    print("=" * 80)
+    print("Gestalt postprocessing")
+    print("=" * 80)
+    print(f"Output directory: {output_dir}")
+    print()
+    print("[1] Main comparison (GenMatter vs SegAnyMo vs FlowSAM)")
+    print(f"    GenMatter runs: {config.GESTALT_OUTPUT_DIR}")
+    print(f"    GT / FlowSAM:   {config.GESTALT_BASE_PATH}")
+    if config.SEGANYMO_BASE_PATH is not None:
+        print(f"    SegAnyMo:       {config.SEGANYMO_BASE_PATH}")
+    else:
+        print("    SegAnyMo:       (SEGANYMO_BASE_PATH not set)")
+    print()
+    print("[2] Depth ablation (full-depth vs depth-ablation GenMatter)")
+    print(f"    Baseline runs:  {config.GESTALT_OUTPUT_DIR}")
+    print(f"    Ablation runs:  {config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR}")
+    print("=" * 80)
+    print()
+
     # Discover which scene/texture combos have data
     existing_combinations: list[tuple[str, str]] = []
     for scene in SCENES:
@@ -391,165 +414,173 @@ def main() -> None:
             ):
                 existing_combinations.append((scene, texture))
 
-    print(f"Processing {len(existing_combinations)} combinations\n")
-
-    # ---- per-combo evaluation ----
-    all_results: list[dict] = []
-    for scene, texture in existing_combinations:
-        print(f"  {scene} / {texture}")
-
-        seg_frames: list[float | None] = []
-        fs_frames: list[float | None] = []
-        gm_frames: list[float | None] = []
-
-        seg_m_frames: list[dict | None] = []
-        fs_m_frames: list[dict | None] = []
-        gm_m_frames: list[dict | None] = []
-
-        for frame_idx in range(NUM_FRAMES):
-            result = evaluate_all_methods(scene, texture, frame_idx, NUM_PROBES)
-            if result is None:
-                seg_frames.append(None)
-                fs_frames.append(None)
-                gm_frames.append(None)
-                seg_m_frames.append(None)
-                fs_m_frames.append(None)
-                gm_m_frames.append(None)
-            else:
-                seg_frames.append(result["seganymo_acc"])
-                fs_frames.append(result["flowsam_acc"])
-                gm_frames.append(result["genmatter_acc"])
-                seg_m_frames.append(result["seganymo_metrics"])
-                fs_m_frames.append(result["flowsam_metrics"])
-                gm_m_frames.append(result["genmatter_metrics"])
-
-        def _mean_valid(vals):
-            v = [x for x in vals if x is not None]
-            return (float(np.mean(v)), float(np.std(v))) if v else (None, None)
-
-        seg_mean, seg_std = _mean_valid(seg_frames)
-        fs_mean, fs_std = _mean_valid(fs_frames)
-        gm_mean, gm_std = _mean_valid(gm_frames)
-
-        all_results.append(
-            {
-                "scene": scene,
-                "texture": texture,
-                "seganymo_mean": seg_mean,
-                "seganymo_std": seg_std,
-                "flowsam_mean": fs_mean,
-                "flowsam_std": fs_std,
-                "genmatter_mean": gm_mean,
-                "genmatter_std": gm_std,
-                "seganymo_frames": seg_frames,
-                "flowsam_frames": fs_frames,
-                "genmatter_frames": gm_frames,
-                "seganymo_metrics": _average_metrics(seg_m_frames),
-                "flowsam_metrics": _average_metrics(fs_m_frames),
-                "genmatter_metrics": _average_metrics(gm_m_frames),
-            }
+    if not existing_combinations:
+        print(
+            "Skipping [1] main comparison: no SegAnyMo / FlowSAM / GenMatter run data found for any scene–texture.\n"
         )
 
-    # ---- save all_results.json ----
-    all_results_path = output_dir / "gestalt_all_results.json"
-    with open(all_results_path, "w") as f:
-        json.dump(all_results, f, indent=2, default=_numpy_safe)
+    all_results: list[dict] = []
+    if existing_combinations:
+        print(f"[1] Processing {len(existing_combinations)} scene–texture combinations\n")
 
-    # ---- summary ----
-    seganymo_all = [r["seganymo_mean"] for r in all_results if r["seganymo_mean"] is not None]
-    flowsam_all = [r["flowsam_mean"] for r in all_results if r["flowsam_mean"] is not None]
-    genmatter_all = [r["genmatter_mean"] for r in all_results if r["genmatter_mean"] is not None]
+        # ---- per-combo evaluation ----
+        for scene, texture in existing_combinations:
+            print(f"  {scene} / {texture}")
 
-    summary: dict = {}
-    for name, vals, mkey in [
-        ("seganymo", seganymo_all, "seganymo_metrics"),
-        ("flowsam", flowsam_all, "flowsam_metrics"),
-        ("genmatter", genmatter_all, "genmatter_metrics"),
-    ]:
-        summary[name] = {
-            "n": len(vals),
-            "accuracy": {
-                "mean": float(np.mean(vals)) if vals else None,
-                "std": float(np.std(vals)) if vals else None,
-            },
-            "metrics": _metrics_summary(all_results, mkey),
-        }
+            seg_frames: list[float | None] = []
+            fs_frames: list[float | None] = []
+            gm_frames: list[float | None] = []
 
-    # Paired comparisons (only when all three methods have data)
-    paired = [
-        (r["seganymo_mean"], r["flowsam_mean"], r["genmatter_mean"])
-        for r in all_results
-        if r["seganymo_mean"] is not None
-        and r["flowsam_mean"] is not None
-        and r["genmatter_mean"] is not None
-    ]
-    if paired:
-        p_seg, p_fs, p_gm = zip(*paired)
-        p_seg, p_fs, p_gm = list(p_seg), list(p_fs), list(p_gm)
+            seg_m_frames: list[dict | None] = []
+            fs_m_frames: list[dict | None] = []
+            gm_m_frames: list[dict | None] = []
 
-        def _comparison(a, b, name_a, name_b):
-            diff = np.array(a) - np.array(b)
-            t, p = stats.ttest_rel(a, b)
-            return {
-                "n": len(a),
-                "mean_diff": float(np.mean(diff)),
-                "std_diff": float(np.std(diff)),
-                f"{name_a}_wins": int(np.sum(diff > 0)),
-                f"{name_b}_wins": int(np.sum(diff < 0)),
-                "t_stat": float(t),
-                "p_value": float(p),
+            for frame_idx in range(NUM_FRAMES):
+                result = evaluate_all_methods(scene, texture, frame_idx, NUM_PROBES)
+                if result is None:
+                    seg_frames.append(None)
+                    fs_frames.append(None)
+                    gm_frames.append(None)
+                    seg_m_frames.append(None)
+                    fs_m_frames.append(None)
+                    gm_m_frames.append(None)
+                else:
+                    seg_frames.append(result["seganymo_acc"])
+                    fs_frames.append(result["flowsam_acc"])
+                    gm_frames.append(result["genmatter_acc"])
+                    seg_m_frames.append(result["seganymo_metrics"])
+                    fs_m_frames.append(result["flowsam_metrics"])
+                    gm_m_frames.append(result["genmatter_metrics"])
+
+            def _mean_valid(vals):
+                v = [x for x in vals if x is not None]
+                return (float(np.mean(v)), float(np.std(v))) if v else (None, None)
+
+            seg_mean, seg_std = _mean_valid(seg_frames)
+            fs_mean, fs_std = _mean_valid(fs_frames)
+            gm_mean, gm_std = _mean_valid(gm_frames)
+
+            all_results.append(
+                {
+                    "scene": scene,
+                    "texture": texture,
+                    "seganymo_mean": seg_mean,
+                    "seganymo_std": seg_std,
+                    "flowsam_mean": fs_mean,
+                    "flowsam_std": fs_std,
+                    "genmatter_mean": gm_mean,
+                    "genmatter_std": gm_std,
+                    "seganymo_frames": seg_frames,
+                    "flowsam_frames": fs_frames,
+                    "genmatter_frames": gm_frames,
+                    "seganymo_metrics": _average_metrics(seg_m_frames),
+                    "flowsam_metrics": _average_metrics(fs_m_frames),
+                    "genmatter_metrics": _average_metrics(gm_m_frames),
+                }
+            )
+
+        # ---- save all_results.json ----
+        all_results_path = output_dir / "gestalt_all_results.json"
+        with open(all_results_path, "w") as f:
+            json.dump(all_results, f, indent=2, default=_numpy_safe)
+
+        # ---- summary ----
+        seganymo_all = [r["seganymo_mean"] for r in all_results if r["seganymo_mean"] is not None]
+        flowsam_all = [r["flowsam_mean"] for r in all_results if r["flowsam_mean"] is not None]
+        genmatter_all = [r["genmatter_mean"] for r in all_results if r["genmatter_mean"] is not None]
+
+        summary: dict = {}
+        for name, vals, mkey in [
+            ("seganymo", seganymo_all, "seganymo_metrics"),
+            ("flowsam", flowsam_all, "flowsam_metrics"),
+            ("genmatter", genmatter_all, "genmatter_metrics"),
+        ]:
+            summary[name] = {
+                "n": len(vals),
+                "accuracy": {
+                    "mean": float(np.mean(vals)) if vals else None,
+                    "std": float(np.std(vals)) if vals else None,
+                },
+                "metrics": _metrics_summary(all_results, mkey),
             }
 
-        summary["comparisons"] = {
-            "seganymo_vs_flowsam": _comparison(p_seg, p_fs, "seganymo", "flowsam"),
-            "seganymo_vs_genmatter": _comparison(p_seg, p_gm, "seganymo", "genmatter"),
-            "flowsam_vs_genmatter": _comparison(p_fs, p_gm, "flowsam", "genmatter"),
-        }
+        # Paired comparisons (only when all three methods have data)
+        paired = [
+            (r["seganymo_mean"], r["flowsam_mean"], r["genmatter_mean"])
+            for r in all_results
+            if r["seganymo_mean"] is not None
+            and r["flowsam_mean"] is not None
+            and r["genmatter_mean"] is not None
+        ]
+        if paired:
+            p_seg, p_fs, p_gm = zip(*paired)
+            p_seg, p_fs, p_gm = list(p_seg), list(p_fs), list(p_gm)
 
-    summary_path = output_dir / "gestalt_summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2, default=_numpy_safe)
+            def _comparison(a, b, name_a, name_b):
+                diff = np.array(a) - np.array(b)
+                t, p = stats.ttest_rel(a, b)
+                return {
+                    "n": len(a),
+                    "mean_diff": float(np.mean(diff)),
+                    "std_diff": float(np.std(diff)),
+                    f"{name_a}_wins": int(np.sum(diff > 0)),
+                    f"{name_b}_wins": int(np.sum(diff < 0)),
+                    "t_stat": float(t),
+                    "p_value": float(p),
+                }
 
-    # ---- CSV (one row per scene/texture) ----
-    csv_path = output_dir / "gestalt_results.csv"
-    fieldnames = [
-        "scene",
-        "texture",
-        "seganymo_accuracy",
-        "flowsam_accuracy",
-        "genmatter_accuracy",
-        "seganymo_jaccard",
-        "flowsam_jaccard",
-        "genmatter_jaccard",
-        "seganymo_precision",
-        "flowsam_precision",
-        "genmatter_precision",
-        "seganymo_recall",
-        "flowsam_recall",
-        "genmatter_recall",
-        "seganymo_f1",
-        "flowsam_f1",
-        "genmatter_f1",
-    ]
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for r in all_results:
-            row: dict = {"scene": r["scene"], "texture": r["texture"]}
-            for method in ("seganymo", "flowsam", "genmatter"):
-                row[f"{method}_accuracy"] = r[f"{method}_mean"]
-                m = r[f"{method}_metrics"]
-                for metric in ("jaccard", "precision", "recall", "f1"):
-                    row[f"{method}_{metric}"] = m[metric] if m else None
-            writer.writerow(row)
+            summary["comparisons"] = {
+                "seganymo_vs_flowsam": _comparison(p_seg, p_fs, "seganymo", "flowsam"),
+                "seganymo_vs_genmatter": _comparison(p_seg, p_gm, "seganymo", "genmatter"),
+                "flowsam_vs_genmatter": _comparison(p_fs, p_gm, "flowsam", "genmatter"),
+            }
 
-    # ---- stdout summary table ----
-    _print_summary(all_results, summary)
+        summary_path = output_dir / "gestalt_summary.json"
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2, default=_numpy_safe)
 
-    print(f"\nOutputs written to {output_dir}/")
-    print(f"  - gestalt_all_results.json  ({len(all_results)} combos)")
-    print(f"  - gestalt_summary.json")
-    print(f"  - gestalt_results.csv")
+        # ---- CSV (one row per scene/texture) ----
+        csv_path = output_dir / "gestalt_results.csv"
+        fieldnames = [
+            "scene",
+            "texture",
+            "seganymo_accuracy",
+            "flowsam_accuracy",
+            "genmatter_accuracy",
+            "seganymo_jaccard",
+            "flowsam_jaccard",
+            "genmatter_jaccard",
+            "seganymo_precision",
+            "flowsam_precision",
+            "genmatter_precision",
+            "seganymo_recall",
+            "flowsam_recall",
+            "genmatter_recall",
+            "seganymo_f1",
+            "flowsam_f1",
+            "genmatter_f1",
+        ]
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for r in all_results:
+                row: dict = {"scene": r["scene"], "texture": r["texture"]}
+                for method in ("seganymo", "flowsam", "genmatter"):
+                    row[f"{method}_accuracy"] = r[f"{method}_mean"]
+                    m = r[f"{method}_metrics"]
+                    for metric in ("jaccard", "precision", "recall", "f1"):
+                        row[f"{method}_{metric}"] = m[metric] if m else None
+                writer.writerow(row)
+
+        # ---- stdout summary table ----
+        _print_summary(all_results, summary)
+
+        print(f"\nOutputs written to {output_dir}/")
+        print(f"  - gestalt_all_results.json  ({len(all_results)} combos)")
+        print("  - gestalt_summary.json")
+        print("  - gestalt_results.csv")
+
+    run_gestalt_ablation_postprocess()
 
 
 # ---------------------------------------------------------------------------
