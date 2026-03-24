@@ -5,6 +5,8 @@ __pycache__/
 
 # custom
 .jax_cache/
+# Video-Depth-Anything: cloned on first 3D-motion preprocessing run (depth-anything/Video-Depth-Anything)
+external/video-depth-anything/
 *.pt
 
 # C extensions

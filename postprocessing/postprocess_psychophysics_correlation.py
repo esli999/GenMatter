@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Human vs model correlation plot from psychophysics ``*_benchmark.json``.
 
-Default input: ``<GENMATTER_RESULTS_DIR>/psychophysics/full_benchmark.json`` (see ``config.PSYCHOPHYSICS_OUTPUT_DIR``).
+By default, processes every ``*_benchmark.json`` under ``results/psychophysics/`` (full run and
+ablations). Use ``--input`` for a single file.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -19,34 +22,18 @@ sys.path.insert(0, str(_REPO))
 import config
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Psychophysics human–model correlation plot")
-    default_json = config.PSYCHOPHYSICS_OUTPUT_DIR / "full_benchmark.json"
-    parser.add_argument(
-        "--input",
-        type=str,
-        default=str(default_json),
-        help=f"Benchmark JSON (default: {default_json})",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default=None,
-        help="Output PNG path (default: results/postprocessing/psychophysics_correlation_<stem>.png)",
-    )
-    parser.add_argument(
-        "--dpi",
-        type=int,
-        default=300,
-        help="Resolution for PNG output (matches psychophysics_benchmark.ipynb savefig)",
-    )
-    args = parser.parse_args()
+def _discover_benchmark_jsons(psych_dir: Path) -> list[Path]:
+    if not psych_dir.is_dir():
+        return []
+    return sorted(psych_dir.glob("*_benchmark.json"))
 
-    inp = Path(args.input)
-    if not inp.is_file():
-        print(f"Error: not found: {inp}", file=sys.stderr)
-        sys.exit(1)
 
+def _render_correlation_plot(
+    inp: Path,
+    out_png: Path | None,
+    dpi: int,
+) -> Path:
+    """Load benchmark JSON, write one PNG. Raises ``ValueError`` if too few paired points."""
     with open(inp, "r") as f:
         data = json.load(f)
 
@@ -66,8 +53,9 @@ def main():
         gt_flags.append(bool(gt) if isinstance(gt, bool) else bool(int(gt)))
 
     if len(human_values) < 2:
-        print("Error: need at least two stimuli with human results for correlation plot.", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(
+            f"need at least two stimuli with human results for correlation plot (got {len(human_values)})"
+        )
 
     human_values = np.array(human_values, dtype=np.float64)
     model_values = np.array(model_values, dtype=np.float64)
@@ -79,7 +67,6 @@ def main():
     rcParams["figure.facecolor"] = "white"
     rcParams["grid.color"] = "#e0e0e0"
     rcParams["grid.linewidth"] = 0.8
-    # Bundled with matplotlib; avoids DM Sans / system-font lookups.
     rcParams["font.family"] = "DejaVu Sans"
 
     fig, ax = plt.subplots(figsize=(12, 12), dpi=100)
@@ -201,18 +188,88 @@ def main():
 
     out_post = config.POSTPROCESSING_OUTPUT_DIR
     out_post.mkdir(parents=True, exist_ok=True)
-    if args.output:
-        out_png = Path(args.output)
+    if out_png is not None:
+        final_png = Path(out_png)
     else:
         stem = inp.stem.replace("_benchmark", "")
-        out_png = out_post / f"psychophysics_correlation_{stem}.png"
+        final_png = out_post / f"psychophysics_correlation_{stem}.png"
 
-    out_png.parent.mkdir(parents=True, exist_ok=True)
+    final_png.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(out_png, dpi=args.dpi, bbox_inches="tight")
+    fig.savefig(final_png, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-    print(f"Wrote {out_png}")
+    return final_png
+
+
+def main() -> int:
+    psych_default = config.PSYCHOPHYSICS_OUTPUT_DIR
+    parser = argparse.ArgumentParser(
+        description="Psychophysics human–model correlation plots from benchmark JSON(s)"
+    )
+    parser.add_argument(
+        "--psychophysics-dir",
+        type=Path,
+        default=psych_default,
+        help=f"Directory to scan for *_benchmark.json when --input is omitted (default: {psych_default})",
+    )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="Single benchmark JSON (if omitted, all *_benchmark.json under --psychophysics-dir)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output PNG path (only with --input; default: postprocessing/psychophysics_correlation_<stem>.png)",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Resolution for PNG output (matches psychophysics_benchmark.ipynb savefig)",
+    )
+    args = parser.parse_args()
+
+    if args.input is None and args.output is not None:
+        print("Error: --output requires --input", file=sys.stderr)
+        return 1
+
+    if args.input is not None:
+        inp = Path(args.input).resolve()
+        if not inp.is_file():
+            print(f"Error: not found: {inp}", file=sys.stderr)
+            return 1
+        out_arg = Path(args.output).resolve() if args.output else None
+        try:
+            out = _render_correlation_plot(inp, out_arg, args.dpi)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        print(f"Wrote {out}")
+        return 0
+
+    psych_dir = args.psychophysics_dir.resolve()
+    paths = _discover_benchmark_jsons(psych_dir)
+    if not paths:
+        print(
+            f"No *_benchmark.json files under {psych_dir}",
+            file=sys.stderr,
+        )
+        return 1
+
+    ok = 0
+    for inp in paths:
+        try:
+            out = _render_correlation_plot(inp, None, args.dpi)
+            print(f"Wrote {out}")
+            ok += 1
+        except ValueError as e:
+            print(f"Skip {inp.name}: {e}", file=sys.stderr)
+
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

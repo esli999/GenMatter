@@ -27,6 +27,12 @@ dependencies = [
     "rich==13.9.4",
     "pymunk==6.8.1",
     "pygame==2.6.1",
+    "ultralytics>=8.4.26",
+    "einops>=0.4.1",
+    "easydict",
+    "av>=16.0.1",
+    "xformers==0.0.29.post3",
+    "setuptools>=69",
 ]
 
 [tool.hatch.build.targets.wheel]

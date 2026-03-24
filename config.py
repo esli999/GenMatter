@@ -16,6 +16,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.resolve()
 
+# SAM / Ultralytics checkpoints (see ``experiments/davis/sam_frame0_extractor.py``)
+DEEPLEARNING_WEIGHTS_DIR = (
+    Path(os.environ["GENMATTER_DEEPLEARNING_WEIGHTS_DIR"]).expanduser().resolve()
+    if os.environ.get("GENMATTER_DEEPLEARNING_WEIGHTS_DIR")
+    else (REPO_ROOT / "assets" / "deeplearning_weights").resolve()
+)
+
 
 def _legacy_data_root() -> Path | None:
     """Optional sibling checkout with ``assets/`` and ``raft_flows/`` (``GENMATTER_LEGACY_DATA_ROOT``)."""
