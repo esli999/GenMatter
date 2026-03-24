@@ -1,6 +1,6 @@
 # GenMatter
 
-Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TAP-Vid DAVIS).
+Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TAP-Vid DAVIS + RDK Psychophysics).
 
 ## Requirements
 
@@ -19,7 +19,8 @@ uv sync
 
 ## Data
 
-The paper has **three** experiments. Put all data for the experiments under **`assets/`** at the repository root (that directory is gitignored). **`config.py`** defines the exact subfolder names, video list (`TAPVID_DAVIS_VIDEO_NAMES`), and Gestalt scene/texture lists (`GESTALT_SCENES`, `GESTALT_TEXTURES`); you normally do not set path env vars unless you relocate data.
+The paper has **three** experiments. Put all data for the experiments under **`assets/`** at the repository root (that directory is gitignored).
+
 
 | Setup | Role | Root under `assets/` |
 |-------|------|------------------------|
@@ -36,10 +37,10 @@ The paper has **three** experiments. Put all data for the experiments under **`a
 
 **Scale:** 20 scenes × 7 textures (see `config.py`).
 
-**Download (from repo root)**
+**Download (from AWS S3)**
 
 ```bash
-wget -x -nH -c -P assets -i scripts/gestalt_stimuli_urls.txt
+uv run python scripts/download_url_list.py -P assets -c -i scripts/gestalt_stimuli_urls.txt
 ```
 
 ### DAVIS TAP-Vid (`assets/tapvid_davis_30_videos_processed/`)
@@ -56,10 +57,10 @@ wget -x -nH -c -P assets -i scripts/gestalt_stimuli_urls.txt
 
 **Download**
 
-**Option A — S3 mirror**
+**Option A — AWS S3 mirror**
 
 ```bash
-wget -x -nH -c -P assets -i scripts/tapvid_davis_urls.txt
+uv run python scripts/download_url_list.py -P assets -c -i scripts/tapvid_davis_urls.txt
 ```
 
 **Option B — Download DAVIS + preprocess** (downloads DAVIS, then builds npzs, DINO, SAM, 3D motion)
@@ -79,10 +80,10 @@ uv run python run_experiments.py davis-preprocess
 
 **Download**
 
-**Option A — S3**
+**Option A — AWS S3**
 
 ```bash
-wget -x -nH -c -P assets -i scripts/rdk_urls.txt
+uv run python scripts/download_url_list.py -P assets -c -i scripts/rdk_urls.txt
 ```
 
 **Option B — local preprocess**

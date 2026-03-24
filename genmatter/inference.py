@@ -3,9 +3,9 @@ import jax.numpy as jnp
 import genjax
 from genjax import gen
 from genjax import ChoiceMapBuilder as C
-from .datatypes import HDGMM_State, HDGMM_Gibbs_TraceWrapper, HDGMM_Hyperblobs_State, HDGMM_Blobs_State, HDGMM_Datapoints_State, HDGMM_Hyperparams
+from .datatypes import GenMatter_State, GenMatter_Gibbs_TraceWrapper, GenMatter_Hyperblobs_State, GenMatter_Blobs_State, GenMatter_Datapoints_State, GenMatter_Hyperparams
 from .core_types import f_, truncate_eigenval_ratio, inverse_wishart
-from .trace_wrappers import hdgmm_TraceWrapper, __hdgmm_TraceWrapper__
+from .trace_wrappers import genmatter_TraceWrapper, __genmatter_TraceWrapper__
 
 def stable_segment_sum(data, segment_ids, num_segments):
     # Create one-hot encoding of segment_ids
@@ -134,20 +134,20 @@ def normal_normal_posterior_full_cov_batched_flexible_prior(x, cluster_ids, mu0_
 
 
 
-def empty_gibbs(key, hdgmm_state : HDGMM_State):
-    return hdgmm_state
+def empty_gibbs(key, genmatter_state : GenMatter_State):
+    return genmatter_state
 
-def empty_gibbs_weighted(key, hdgmm_state : HDGMM_State, use_weighted_blobs = False):
-    return hdgmm_state
+def empty_gibbs_weighted(key, genmatter_state : GenMatter_State, use_weighted_blobs = False):
+    return genmatter_state
 
 # Gibbs #1: Update blob weights 
-def gibbs_blob_weights(key, hdgmm_state : HDGMM_State): 
+def gibbs_blob_weights(key, genmatter_state : GenMatter_State): 
     posterior_key, _ = jax.random.split(key)
 
     # Get the data and parameters from the trace
-    num_blobs = hdgmm_state.hypers.n_blobs
-    prior_beta = hdgmm_state.hypers.beta
-    blob_idxs = hdgmm_state.datapoints_state.blob_assignments  # [N]
+    num_blobs = genmatter_state.hypers.n_blobs
+    prior_beta = genmatter_state.hypers.beta
+    blob_idxs = genmatter_state.datapoints_state.blob_assignments  # [N]
 
     # Compute counts via segment_sum
     blob_counts = jax.ops.segment_sum(
@@ -162,21 +162,21 @@ def gibbs_blob_weights(key, hdgmm_state : HDGMM_State):
     # Sample new blob weights
     new_blob_weights = genjax.dirichlet.sample(posterior_key, new_betas)
 
-    return hdgmm_state.replace({'blobs_state': {'blob_weights': new_blob_weights}})
+    return genmatter_state.replace({'blobs_state': {'blob_weights': new_blob_weights}})
 
 
 # Gibbs #2: Update hyperblob weights 
-def gibbs_hyperblob_weights(key, hdgmm_state : HDGMM_State, use_weighted_blobs = False):
+def gibbs_hyperblob_weights(key, genmatter_state : GenMatter_State, use_weighted_blobs = False):
     posterior_key, _ = jax.random.split(key)
 
     # Get the data and parameters from the trace
-    num_hyperblobs = hdgmm_state.hypers.n_hyperblobs
-    prior_alpha = hdgmm_state.hypers.alpha
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments  # [L]
+    num_hyperblobs = genmatter_state.hypers.n_hyperblobs
+    prior_alpha = genmatter_state.hypers.alpha
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments  # [L]
 
     # for weighted sums (i.e. weighted by number of datapoints assigned to each blob)
-    blob_weights = hdgmm_state.blobs_state.blob_weights
-    num_blobs = hdgmm_state.hypers.n_blobs
+    blob_weights = genmatter_state.blobs_state.blob_weights
+    num_blobs = genmatter_state.hypers.n_blobs
 
     blob_pseudocounts = jnp.where(use_weighted_blobs, blob_weights * num_blobs, jnp.ones_like(hyperblob_assignments, dtype=jnp.float32))
 
@@ -193,25 +193,25 @@ def gibbs_hyperblob_weights(key, hdgmm_state : HDGMM_State, use_weighted_blobs =
     # Sample new hyperblob weights
     new_hyperblob_weights = genjax.dirichlet.sample(posterior_key, new_alphas)
 
-    return hdgmm_state.replace({'hyperblobs_state': {'hyperblob_weights': new_hyperblob_weights}})
+    return genmatter_state.replace({'hyperblobs_state': {'hyperblob_weights': new_hyperblob_weights}})
 
 
 # Likelihood model for blob datapoints used in Gibbs #3 
 @gen
-def blob_datapoint_likelihood_model_no_assignment(blob_state : HDGMM_Blobs_State):
+def blob_datapoint_likelihood_model_no_assignment(blob_state : GenMatter_Blobs_State):
     datapoint_position = genjax.mv_normal(blob_state.blob_means, blob_state.blob_covs) @ 'datapoint_position'
     datapoint_vel = genjax.mv_normal(blob_state.blob_vel_means, blob_state.blob_vel_covs) @ 'datapoint_vel'
     return None
 
-def gibbs_blob_assignments(key, hdgmm_state, position_only=False, velocity_only=False, disable_outlier_prob=False):
+def gibbs_blob_assignments(key, genmatter_state, position_only=False, velocity_only=False, disable_outlier_prob=False):
     posterior_key, _ = jax.random.split(key)
 
-    hypers = hdgmm_state.hypers
+    hypers = genmatter_state.hypers
     num_blobs = hypers.n_blobs
     num_datapoints = hypers.n_datapoints
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions
-    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
-    blobs_state = hdgmm_state.blobs_state
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    blobs_state = genmatter_state.blobs_state
 
     # disable velocity updates if position_only is True
     gibbs_blob_vel_covs = jnp.where(position_only, 1e14 * blobs_state.blob_vel_covs, blobs_state.blob_vel_covs)
@@ -266,23 +266,23 @@ def gibbs_blob_assignments(key, hdgmm_state, position_only=False, velocity_only=
     all_logprobs = jax.vmap(compute_local_density)(jnp.arange(num_datapoints))  # [N, L+1]
     updated_assignments = genjax.categorical.sample(posterior_key, logits=all_logprobs)
 
-    return hdgmm_state.replace({
+    return genmatter_state.replace({
         'datapoints_state': {
             'blob_assignments': updated_assignments
         }
     })
 
-def gibbs_blob_assignments_batched(key, hdgmm_state, position_only=False, velocity_only=False, disable_outlier_prob=False):
+def gibbs_blob_assignments_batched(key, genmatter_state, position_only=False, velocity_only=False, disable_outlier_prob=False):
     posterior_key, _ = jax.random.split(key)
 
     batch_size = 1024  # Changed to divide 4096 evenly
 
-    hypers = hdgmm_state.hypers
+    hypers = genmatter_state.hypers
     num_blobs = hypers.n_blobs
     num_datapoints = hypers.n_datapoints
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions
-    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
-    blobs_state = hdgmm_state.blobs_state
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    blobs_state = genmatter_state.blobs_state
 
     # disable velocity updates if position_only is True
     gibbs_blob_vel_covs = jnp.where(position_only, 1e14 * blobs_state.blob_vel_covs, blobs_state.blob_vel_covs)
@@ -356,7 +356,7 @@ def gibbs_blob_assignments_batched(key, hdgmm_state, position_only=False, veloci
     # Sample from the computed logprobs
     updated_assignments = genjax.categorical.sample(posterior_key, logits=all_logprobs)
 
-    return hdgmm_state.replace({
+    return genmatter_state.replace({
         'datapoints_state': {
             'blob_assignments': updated_assignments
         }
@@ -364,7 +364,7 @@ def gibbs_blob_assignments_batched(key, hdgmm_state, position_only=False, veloci
 
 # Likelihood model for hyperblob blobs used in Gibbs #4
 @gen
-def hyperblob_blob_likelihood_model(hyperblobs_state : HDGMM_Hyperblobs_State, hypers : HDGMM_Hyperparams):
+def hyperblob_blob_likelihood_model(hyperblobs_state : GenMatter_Hyperblobs_State, hypers : GenMatter_Hyperparams):
     hyperblob_idx = genjax.categorical(probs = hyperblobs_state.hyperblob_weights) @ 'hyperblob_assignment'
     hyperblob_state = hyperblobs_state[hyperblob_idx]
     blob_mean = genjax.mv_normal(hyperblob_state.hyperblob_means, hyperblob_state.hyperblob_covs) @ 'blob_mean'
@@ -373,16 +373,16 @@ def hyperblob_blob_likelihood_model(hyperblobs_state : HDGMM_Hyperblobs_State, h
     return None
 
 # Gibbs #4: Update hyperblob assignments 
-def gibbs_hyperblob_assignments(key, hdgmm_state : HDGMM_State):
+def gibbs_hyperblob_assignments(key, genmatter_state : GenMatter_State):
     posterior_key, _ = jax.random.split(key)
 
     # get the data and parameters from the trace
-    num_hyperblobs = hdgmm_state.hypers.n_hyperblobs
-    num_blobs = hdgmm_state.hypers.n_blobs
-    blob_means = hdgmm_state.blobs_state.blob_means
-    blob_vel_means = hdgmm_state.blobs_state.blob_vel_means
-    hyperblobs_state = hdgmm_state.hyperblobs_state
-    hypers = hdgmm_state.hypers
+    num_hyperblobs = genmatter_state.hypers.n_hyperblobs
+    num_blobs = genmatter_state.hypers.n_blobs
+    blob_means = genmatter_state.blobs_state.blob_means
+    blob_vel_means = genmatter_state.blobs_state.blob_vel_means
+    hyperblobs_state = genmatter_state.hyperblobs_state
+    hypers = genmatter_state.hypers
 
     def compute_local_density(blob_idx):
         chm = (C["blob_mean"].set(blob_means[blob_idx]) 
@@ -399,23 +399,23 @@ def gibbs_hyperblob_assignments(key, hdgmm_state : HDGMM_State):
     # Sample new assignments
     updated_hyperblob_assignments = genjax.categorical.sample(posterior_key, logits = local_densities)
 
-    return hdgmm_state.replace({'blobs_state': {'hyperblob_assignments': updated_hyperblob_assignments}})
+    return genmatter_state.replace({'blobs_state': {'hyperblob_assignments': updated_hyperblob_assignments}})
 
 # Gibbs #5: Update hyperblob covariances 
-def gibbs_hyperblob_covs(key, hdgmm_state, use_weighted_blobs = False):
+def gibbs_hyperblob_covs(key, genmatter_state, use_weighted_blobs = False):
     posterior_key, _ = jax.random.split(key)
 
-    blob_means = hdgmm_state.blobs_state.blob_means
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments
-    assumed_known_means = hdgmm_state.hyperblobs_state.hyperblob_means
-    prior_nu_H = hdgmm_state.hypers.nu_H
-    prior_Psi_H = hdgmm_state.hypers.Psi_H
+    blob_means = genmatter_state.blobs_state.blob_means
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments
+    assumed_known_means = genmatter_state.hyperblobs_state.hyperblob_means
+    prior_nu_H = genmatter_state.hypers.nu_H
+    prior_Psi_H = genmatter_state.hypers.Psi_H
 
-    n_hyperblobs = hdgmm_state.hypers.n_hyperblobs
+    n_hyperblobs = genmatter_state.hypers.n_hyperblobs
 
     # for weighted sums (i.e. weighted by number of datapoints assigned to each blob)
-    blob_weights = hdgmm_state.blobs_state.blob_weights
-    num_blobs = hdgmm_state.hypers.n_blobs
+    blob_weights = genmatter_state.blobs_state.blob_weights
+    num_blobs = genmatter_state.hypers.n_blobs
 
     blob_pseudocounts = jnp.where(use_weighted_blobs, blob_weights * num_blobs, jnp.ones_like(hyperblob_assignments, dtype=jnp.float32))
 
@@ -435,25 +435,25 @@ def gibbs_hyperblob_covs(key, hdgmm_state, use_weighted_blobs = False):
     updated_hyperblob_covs = inverse_wishart.sample(posterior_key, nu_posteriors, Psi_posteriors)
 
     # --- 4. Mask: retain previous covariances if N_k <= 3 (3 min points per hyperblob for scatter matrix to be valid in NIW --> full rank) ---
-    current_hyperblob_covs = hdgmm_state.hyperblobs_state.hyperblob_covs  # [K, 3, 3]
+    current_hyperblob_covs = genmatter_state.hyperblobs_state.hyperblob_covs  # [K, 3, 3]
     mask = (N_k >= 3)[:, None, None]  # [K,1,1] to broadcast over 3x3 matrices
 
     final_hyperblob_covs = jnp.where(mask, updated_hyperblob_covs, current_hyperblob_covs)
 
-    return hdgmm_state.replace({'hyperblobs_state': {'hyperblob_covs': final_hyperblob_covs}})
+    return genmatter_state.replace({'hyperblobs_state': {'hyperblob_covs': final_hyperblob_covs}})
 
 
 # Gibbs #6: Update blob covariances 
-def gibbs_blob_covs(key, hdgmm_state):
+def gibbs_blob_covs(key, genmatter_state):
     posterior_key, _ = jax.random.split(key)
 
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
-    assumed_known_means = hdgmm_state.blobs_state.blob_means
-    prior_nu_B = hdgmm_state.hypers.nu_B
-    prior_Psi_B = hdgmm_state.hypers.Psi_B
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments
+    assumed_known_means = genmatter_state.blobs_state.blob_means
+    prior_nu_B = genmatter_state.hypers.nu_B
+    prior_Psi_B = genmatter_state.hypers.Psi_B
 
-    n_blobs = hdgmm_state.hypers.n_blobs
+    n_blobs = genmatter_state.hypers.n_blobs
 
     datapoint_pseudocounts = jnp.ones(datapoint_positions.shape[0], dtype=datapoint_positions.dtype)
 
@@ -474,25 +474,25 @@ def gibbs_blob_covs(key, hdgmm_state):
     updated_blob_covs = inverse_wishart.sample(posterior_key, nu_posteriors, Psi_posteriors)
 
     # --- 4. Mask: retain previous covariances if N_l <= 3 (3 min points per blob for scatter matrix to be valid in NIW --> full rank)---
-    current_blob_covs = hdgmm_state.blobs_state.blob_covs  # [L, 3, 3]
+    current_blob_covs = genmatter_state.blobs_state.blob_covs  # [L, 3, 3]
     mask = (N_l >= 3)[:, None, None]  # [L,1,1] to broadcast over 3x3 matrices
 
     final_blob_covs = jnp.where(mask, updated_blob_covs, current_blob_covs)
 
-    return hdgmm_state.replace({'blobs_state': {'blob_covs': final_blob_covs}})
+    return genmatter_state.replace({'blobs_state': {'blob_covs': final_blob_covs}})
 
 
 # Gibbs #7: Update blob velocity covariances 
-def gibbs_blob_vel_covs(key, hdgmm_state):
+def gibbs_blob_vel_covs(key, genmatter_state):
     posterior_key, _ = jax.random.split(key)
 
-    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
-    assumed_known_vel_means = hdgmm_state.blobs_state.blob_vel_means
-    prior_nu_V = hdgmm_state.hypers.nu_V
-    prior_Psi_V = hdgmm_state.hypers.Psi_V
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments
+    assumed_known_vel_means = genmatter_state.blobs_state.blob_vel_means
+    prior_nu_V = genmatter_state.hypers.nu_V
+    prior_Psi_V = genmatter_state.hypers.Psi_V
 
-    n_blobs = hdgmm_state.hypers.n_blobs
+    n_blobs = genmatter_state.hypers.n_blobs
 
     datapoint_pseudocounts = jnp.ones(datapoint_vels.shape[0], dtype=datapoint_vels.dtype)
 
@@ -512,31 +512,31 @@ def gibbs_blob_vel_covs(key, hdgmm_state):
     updated_blob_vel_covs = inverse_wishart.sample(posterior_key, nu_posteriors, Psi_posteriors)
 
     # --- 4. Mask: retain previous covariances if N_l <= 3 (3 min points per blob for scatter matrix to be valid in NIW --> full rank)---
-    current_blob_vel_covs = hdgmm_state.blobs_state.blob_vel_covs  # [L, 3, 3]
+    current_blob_vel_covs = genmatter_state.blobs_state.blob_vel_covs  # [L, 3, 3]
     mask = (N_l >= 3)[:, None, None]  # [L,1,1] to broadcast over 3x3 matrices
 
     final_blob_vel_covs = jnp.where(mask, updated_blob_vel_covs, current_blob_vel_covs)
 
-    return hdgmm_state.replace({'blobs_state': {'blob_vel_covs': final_blob_vel_covs}})
+    return genmatter_state.replace({'blobs_state': {'blob_vel_covs': final_blob_vel_covs}})
 
 # Gibbs #8: Update blob velocity means 
-def gibbs_blob_vel_means(key, hdgmm_state):
+def gibbs_blob_vel_means(key, genmatter_state):
     posterior_key, _ = jax.random.split(key)
 
-    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments
-    blob_means = hdgmm_state.blobs_state.blob_means
-    assigned_hyperblob_per_blob = hdgmm_state.hyperblobs_state[hyperblob_assignments]
-    likelihood_blob_vel_covs = hdgmm_state.blobs_state.blob_vel_covs
-    current_blob_vel_means = hdgmm_state.blobs_state.blob_vel_means
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments
+    blob_means = genmatter_state.blobs_state.blob_means
+    assigned_hyperblob_per_blob = genmatter_state.hyperblobs_state[hyperblob_assignments]
+    likelihood_blob_vel_covs = genmatter_state.blobs_state.blob_vel_covs
+    current_blob_vel_means = genmatter_state.blobs_state.blob_vel_means
 
-    prior_blob_vel_means_ = assigned_hyperblob_per_blob.hyperblob_trans_vels + jnp.einsum('nij,nj->ni', assigned_hyperblob_per_blob.hyperblob_rot_vels - jnp.repeat(jnp.eye(3)[None, ...], hdgmm_state.hypers.n_blobs, axis=0), blob_means - assigned_hyperblob_per_blob.hyperblob_means)
+    prior_blob_vel_means_ = assigned_hyperblob_per_blob.hyperblob_trans_vels + jnp.einsum('nij,nj->ni', assigned_hyperblob_per_blob.hyperblob_rot_vels - jnp.repeat(jnp.eye(3)[None, ...], genmatter_state.hypers.n_blobs, axis=0), blob_means - assigned_hyperblob_per_blob.hyperblob_means)
 
-    prior_variance = hdgmm_state.hypers.sigma_V
+    prior_variance = genmatter_state.hypers.sigma_V
 
     # Count datapoints per blob
-    n_blobs = hdgmm_state.hypers.n_blobs
+    n_blobs = genmatter_state.hypers.n_blobs
     N_l = jax.ops.segment_sum(
         jnp.ones(datapoint_vels.shape[0], dtype=datapoint_vels.dtype), 
         blob_assignments,
@@ -556,27 +556,27 @@ def gibbs_blob_vel_means(key, hdgmm_state):
     zero_velocities = jnp.zeros_like(posterior_mus)
     posterior_blob_vel_means = jnp.where(has_points[:, None], sampled_vel_means, zero_velocities)
     # posterior_blob_vel_means = jnp.where(has_points[:, None], sampled_vel_means, current_blob_vel_means)
-    return hdgmm_state.replace({'blobs_state': {'blob_vel_means': posterior_blob_vel_means}})
+    return genmatter_state.replace({'blobs_state': {'blob_vel_means': posterior_blob_vel_means}})
 
 # Gibbs #9: Update hyperblob means 
-def gibbs_hyperblob_means(key, hdgmm_state, use_weighted_blobs=False):
+def gibbs_hyperblob_means(key, genmatter_state, use_weighted_blobs=False):
     posterior_key, _ = jax.random.split(key)
     
     # Extract data
-    blob_means = hdgmm_state.blobs_state.blob_means              # [L, 3]
-    blob_vel_means = hdgmm_state.blobs_state.blob_vel_means      # [L, 3]
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments  # [L]
-    blob_weights = hdgmm_state.blobs_state.blob_weights          # [L]
+    blob_means = genmatter_state.blobs_state.blob_means              # [L, 3]
+    blob_vel_means = genmatter_state.blobs_state.blob_vel_means      # [L, 3]
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments  # [L]
+    blob_weights = genmatter_state.blobs_state.blob_weights          # [L]
 
-    hyperblob_covs = hdgmm_state.hyperblobs_state.hyperblob_covs          # [K, 3, 3]
-    rot_vels = hdgmm_state.hyperblobs_state.hyperblob_rot_vels            # [K, 3, 3]
-    trans_vels = hdgmm_state.hyperblobs_state.hyperblob_trans_vels        # [K, 3]
+    hyperblob_covs = genmatter_state.hyperblobs_state.hyperblob_covs          # [K, 3, 3]
+    rot_vels = genmatter_state.hyperblobs_state.hyperblob_rot_vels            # [K, 3, 3]
+    trans_vels = genmatter_state.hyperblobs_state.hyperblob_trans_vels        # [K, 3]
 
-    mu0 = hdgmm_state.hypers.mu_H
-    sigmaH = hdgmm_state.hypers.sigma_H
-    sigmaV = hdgmm_state.hypers.sigma_V
-    K = hdgmm_state.hypers.n_hyperblobs
-    num_blobs = hdgmm_state.hypers.n_blobs
+    mu0 = genmatter_state.hypers.mu_H
+    sigmaH = genmatter_state.hypers.sigma_H
+    sigmaV = genmatter_state.hypers.sigma_V
+    K = genmatter_state.hypers.n_hyperblobs
+    num_blobs = genmatter_state.hypers.n_blobs
 
     L = blob_means.shape[0]
     d = blob_means.shape[1]
@@ -626,34 +626,34 @@ def gibbs_hyperblob_means(key, hdgmm_state, use_weighted_blobs=False):
     # Sample new means
     new_means = genjax.mv_normal.sample(posterior_key, posterior_means, posterior_covs)
 
-    return hdgmm_state.replace({'hyperblobs_state': {'hyperblob_means': new_means}})
+    return genmatter_state.replace({'hyperblobs_state': {'hyperblob_means': new_means}})
 
 # Gibbs #10: Update blob means 
-def gibbs_blob_means(key, hdgmm_state):
+def gibbs_blob_means(key, genmatter_state):
     posterior_key, _ = jax.random.split(key)
 
     # Data
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions  # [N, 3]
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments        # [N]
-    blob_vel_means = hdgmm_state.blobs_state.blob_vel_means                 # [L, 3]
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments   # [L]
-    blob_covs = hdgmm_state.blobs_state.blob_covs                           # [L, 3, 3]
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions  # [N, 3]
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments        # [N]
+    blob_vel_means = genmatter_state.blobs_state.blob_vel_means                 # [L, 3]
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments   # [L]
+    blob_covs = genmatter_state.blobs_state.blob_covs                           # [L, 3, 3]
 
     # Hyperblob info
-    mu_H = hdgmm_state.hyperblobs_state.hyperblob_means                     # [K, 3]
-    trans_vels = hdgmm_state.hyperblobs_state.hyperblob_trans_vels         # [K, 3]
-    rot_vels = hdgmm_state.hyperblobs_state.hyperblob_rot_vels             # [K, 3, 3]
+    mu_H = genmatter_state.hyperblobs_state.hyperblob_means                     # [K, 3]
+    trans_vels = genmatter_state.hyperblobs_state.hyperblob_trans_vels         # [K, 3]
+    rot_vels = genmatter_state.hyperblobs_state.hyperblob_rot_vels             # [K, 3, 3]
 
     # Hyperparams
-    sigmaV = hdgmm_state.hypers.sigma_V
-    L = hdgmm_state.hypers.n_blobs
-    d = hdgmm_state.blobs_state.blob_means.shape[-1] # [L,3] --> [3]
+    sigmaV = genmatter_state.hypers.sigma_V
+    L = genmatter_state.hypers.n_blobs
+    d = genmatter_state.blobs_state.blob_means.shape[-1] # [L,3] --> [3]
 
     # Assign hyperblob means to blobs
     muH_l = mu_H[hyperblob_assignments]  # [L, 3]
 
     # Prior precision
-    hyperblob_cov_inv = jnp.linalg.inv(hdgmm_state.hyperblobs_state.hyperblob_covs[hyperblob_assignments])  # [L, 3, 3]
+    hyperblob_cov_inv = jnp.linalg.inv(genmatter_state.hyperblobs_state.hyperblob_covs[hyperblob_assignments])  # [L, 3, 3]
 
     # Data terms (from datapoints)
     N_l = jax.ops.segment_sum(jnp.ones(datapoint_positions.shape[0]), blob_assignments, num_segments=L) # [L]
@@ -691,19 +691,19 @@ def gibbs_blob_means(key, hdgmm_state):
     # Sample new blob means
     new_blob_means = genjax.mv_normal.sample(posterior_key, mean_post, cov_post)
 
-    return hdgmm_state.replace({'blobs_state': {'blob_means': new_blob_means}})
+    return genmatter_state.replace({'blobs_state': {'blob_means': new_blob_means}})
 
 
 # Gibbs #11: Update hyperblob rotation velocities
-def gibbs_hyperblob_rot(key, hdgmm_state: HDGMM_State, use_weighted_blobs=False):
+def gibbs_hyperblob_rot(key, genmatter_state: GenMatter_State, use_weighted_blobs=False):
     posterior_key, _ = jax.random.split(key)
 
-    hypers = hdgmm_state.hypers
-    hyperblobs_state = hdgmm_state.hyperblobs_state
-    blob_means = hdgmm_state.blobs_state.blob_means
-    blob_vel_means = hdgmm_state.blobs_state.blob_vel_means
-    blob_weights = hdgmm_state.blobs_state.blob_weights
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments
+    hypers = genmatter_state.hypers
+    hyperblobs_state = genmatter_state.hyperblobs_state
+    blob_means = genmatter_state.blobs_state.blob_means
+    blob_vel_means = genmatter_state.blobs_state.blob_vel_means
+    blob_weights = genmatter_state.blobs_state.blob_weights
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments
     hyperblob_trans_vels = hyperblobs_state.hyperblob_trans_vels
 
     n_hyperblobs = hypers.n_hyperblobs
@@ -778,18 +778,18 @@ def gibbs_hyperblob_rot(key, hdgmm_state: HDGMM_State, use_weighted_blobs=False)
     sampled_indices = genjax.categorical.sample(posterior_key, logits=logprobs_per_hk)  # [K]
     updated_rotations = rot_support[sampled_indices]  # [K, 3, 3]
 
-    return hdgmm_state.replace({'hyperblobs_state': {'hyperblob_rot_vels': updated_rotations}})
+    return genmatter_state.replace({'hyperblobs_state': {'hyperblob_rot_vels': updated_rotations}})
 
 # Gibbs #12: Update hyperblob translation velocities 
-def gibbs_hyperblob_trans(key, hdgmm_state: HDGMM_State, use_weighted_blobs=False):
+def gibbs_hyperblob_trans(key, genmatter_state: GenMatter_State, use_weighted_blobs=False):
     posterior_key, _ = jax.random.split(key)
 
-    hypers = hdgmm_state.hypers
-    hyperblobs_state = hdgmm_state.hyperblobs_state
-    blob_means = hdgmm_state.blobs_state.blob_means
-    blob_vel_means = hdgmm_state.blobs_state.blob_vel_means
-    blob_weights = hdgmm_state.blobs_state.blob_weights
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments
+    hypers = genmatter_state.hypers
+    hyperblobs_state = genmatter_state.hyperblobs_state
+    blob_means = genmatter_state.blobs_state.blob_means
+    blob_vel_means = genmatter_state.blobs_state.blob_vel_means
+    blob_weights = genmatter_state.blobs_state.blob_weights
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments
     hyperblob_rot_vels = hyperblobs_state.hyperblob_rot_vels
 
     n_hyperblobs = hypers.n_hyperblobs
@@ -861,28 +861,28 @@ def gibbs_hyperblob_trans(key, hdgmm_state: HDGMM_State, use_weighted_blobs=Fals
     sampled_indices = genjax.categorical.sample(posterior_key, logits=logprobs_per_hk)  # [K]
     updated_translations = trans_support[sampled_indices]  # [K, 3]
 
-    return hdgmm_state.replace({'hyperblobs_state': {'hyperblob_trans_vels': updated_translations}})
+    return genmatter_state.replace({'hyperblobs_state': {'hyperblob_trans_vels': updated_translations}})
 
 
-def gibbs_transitioned_blob_means(key, hdgmm_state, prior_means, prior_covs):
+def gibbs_transitioned_blob_means(key, genmatter_state, prior_means, prior_covs):
     posterior_key, _ = jax.random.split(key)
 
     # Data
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions  # [N, 3]
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments        # [N]
-    blob_vel_means = hdgmm_state.blobs_state.blob_vel_means                 # [L, 3]
-    hyperblob_assignments = hdgmm_state.blobs_state.hyperblob_assignments   # [L]
-    blob_covs = hdgmm_state.blobs_state.blob_covs                           # [L, 3, 3]
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions  # [N, 3]
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments        # [N]
+    blob_vel_means = genmatter_state.blobs_state.blob_vel_means                 # [L, 3]
+    hyperblob_assignments = genmatter_state.blobs_state.hyperblob_assignments   # [L]
+    blob_covs = genmatter_state.blobs_state.blob_covs                           # [L, 3, 3]
 
     # Hyperblob info
-    mu_H = hdgmm_state.hyperblobs_state.hyperblob_means                     # [K, 3]
-    trans_vels = hdgmm_state.hyperblobs_state.hyperblob_trans_vels         # [K, 3]
-    rot_vels = hdgmm_state.hyperblobs_state.hyperblob_rot_vels             # [K, 3, 3]
+    mu_H = genmatter_state.hyperblobs_state.hyperblob_means                     # [K, 3]
+    trans_vels = genmatter_state.hyperblobs_state.hyperblob_trans_vels         # [K, 3]
+    rot_vels = genmatter_state.hyperblobs_state.hyperblob_rot_vels             # [K, 3, 3]
 
     # Hyperparams
-    sigmaV = hdgmm_state.hypers.sigma_V
-    L = hdgmm_state.hypers.n_blobs
-    d = hdgmm_state.blobs_state.blob_means.shape[-1] # [L,3] --> [3]
+    sigmaV = genmatter_state.hypers.sigma_V
+    L = genmatter_state.hypers.n_blobs
+    d = genmatter_state.blobs_state.blob_means.shape[-1] # [L,3] --> [3]
 
     # Assign hyperblob means to blobs
     muH_l = prior_means  # [L, 3]
@@ -936,158 +936,158 @@ def gibbs_transitioned_blob_means(key, hdgmm_state, prior_means, prior_covs):
     # Sample new blob means
     new_blob_means = genjax.mv_normal.sample(posterior_key, mean_post, cov_post)
 
-    return hdgmm_state.replace({'blobs_state': {'blob_means': new_blob_means}})
+    return genmatter_state.replace({'blobs_state': {'blob_means': new_blob_means}})
 
 
 @jax.jit
 def f_gibbs_sweep(carry, gibbs_sweep_idx):
-    key, hdgmm_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs = carry
+    key, genmatter_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs = carry
     # jprint("MCMC Gibbs sweep {}/{}", gibbs_sweep_idx+1, NUM_GIBBS_SWEEPS)
     
     # Datapoint-related updates 
     def datapoint_update_loop(i, state_key_tuple):
-        hdgmm_state, key = state_key_tuple
+        genmatter_state, key = state_key_tuple
         # Gibbs #3: Update blob assignments
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["blob_assignments"], gibbs_blob_assignments_batched, empty_gibbs, gibbs_key, hdgmm_state)
-        return (hdgmm_state, key)
+        genmatter_state = jax.lax.cond(gibbs_dials["blob_assignments"], gibbs_blob_assignments_batched, empty_gibbs, gibbs_key, genmatter_state)
+        return (genmatter_state, key)
     
     
     # Blob-related updates 
     def blob_update_loop(i, state_key_tuple):
-        hdgmm_state, key = state_key_tuple
+        genmatter_state, key = state_key_tuple
         # Gibbs #1: Update blob weights
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["blob_weights"], gibbs_blob_weights, empty_gibbs, gibbs_key, hdgmm_state)
+        genmatter_state = jax.lax.cond(gibbs_dials["blob_weights"], gibbs_blob_weights, empty_gibbs, gibbs_key, genmatter_state)
         
         # Gibbs #4: Update hyperblob assignments
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["hyperblob_assignments"], gibbs_hyperblob_assignments, empty_gibbs, gibbs_key, hdgmm_state)
+        genmatter_state = jax.lax.cond(gibbs_dials["hyperblob_assignments"], gibbs_hyperblob_assignments, empty_gibbs, gibbs_key, genmatter_state)
         
         # Gibbs #6: Update blob covariances
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["blob_covs"], gibbs_blob_covs, empty_gibbs, gibbs_key, hdgmm_state)
+        genmatter_state = jax.lax.cond(gibbs_dials["blob_covs"], gibbs_blob_covs, empty_gibbs, gibbs_key, genmatter_state)
         
         # Gibbs #7: Update blob velocity covariances
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["blob_vel_covs"], gibbs_blob_vel_covs, empty_gibbs, gibbs_key, hdgmm_state)
+        genmatter_state = jax.lax.cond(gibbs_dials["blob_vel_covs"], gibbs_blob_vel_covs, empty_gibbs, gibbs_key, genmatter_state)
         
         # Gibbs #8: Update blob velocity means
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["blob_vel_means"], gibbs_blob_vel_means, empty_gibbs, gibbs_key, hdgmm_state)
+        genmatter_state = jax.lax.cond(gibbs_dials["blob_vel_means"], gibbs_blob_vel_means, empty_gibbs, gibbs_key, genmatter_state)
         
         # Gibbs #10: Update blob means
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["blob_means"], gibbs_blob_means, empty_gibbs, gibbs_key, hdgmm_state)
+        genmatter_state = jax.lax.cond(gibbs_dials["blob_means"], gibbs_blob_means, empty_gibbs, gibbs_key, genmatter_state)
         
-        return (hdgmm_state, key)
+        return (genmatter_state, key)
     
     # Hyperblob-related updates 
     def hyperblob_update_loop(i, state_key_tuple):
-        hdgmm_state, key, use_weighted_blobs = state_key_tuple
+        genmatter_state, key, use_weighted_blobs = state_key_tuple
         # Gibbs #2: Update hyperblob weights
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["hyperblob_weights"], gibbs_hyperblob_weights, empty_gibbs_weighted, gibbs_key, hdgmm_state, use_weighted_blobs)
+        genmatter_state = jax.lax.cond(gibbs_dials["hyperblob_weights"], gibbs_hyperblob_weights, empty_gibbs_weighted, gibbs_key, genmatter_state, use_weighted_blobs)
         
         # Gibbs #5: Update hyperblob covariances
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["hyperblob_covs"], gibbs_hyperblob_covs, empty_gibbs_weighted, gibbs_key, hdgmm_state, use_weighted_blobs)
+        genmatter_state = jax.lax.cond(gibbs_dials["hyperblob_covs"], gibbs_hyperblob_covs, empty_gibbs_weighted, gibbs_key, genmatter_state, use_weighted_blobs)
         
         # Gibbs #9: Update hyperblob means
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["hyperblob_means"], gibbs_hyperblob_means, empty_gibbs_weighted, gibbs_key, hdgmm_state, use_weighted_blobs)
+        genmatter_state = jax.lax.cond(gibbs_dials["hyperblob_means"], gibbs_hyperblob_means, empty_gibbs_weighted, gibbs_key, genmatter_state, use_weighted_blobs)
 
         # Gibbs #11: Update hyperblob rotation velocities
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["hyperblob_rot_vels"], gibbs_hyperblob_rot, empty_gibbs_weighted, gibbs_key, hdgmm_state, use_weighted_blobs)
+        genmatter_state = jax.lax.cond(gibbs_dials["hyperblob_rot_vels"], gibbs_hyperblob_rot, empty_gibbs_weighted, gibbs_key, genmatter_state, use_weighted_blobs)
 
         # Gibbs #12: Update hyperblob translation velocities
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = jax.lax.cond(gibbs_dials["hyperblob_trans_vels"], gibbs_hyperblob_trans, empty_gibbs_weighted, gibbs_key, hdgmm_state, use_weighted_blobs)
+        genmatter_state = jax.lax.cond(gibbs_dials["hyperblob_trans_vels"], gibbs_hyperblob_trans, empty_gibbs_weighted, gibbs_key, genmatter_state, use_weighted_blobs)
         
-        return (hdgmm_state, key, use_weighted_blobs)
+        return (genmatter_state, key, use_weighted_blobs)
     
-    hdgmm_state, key = jax.lax.fori_loop(0, num_gibbs_inner_loops, datapoint_update_loop, (hdgmm_state, key))
-    hdgmm_state, key = jax.lax.fori_loop(0, num_gibbs_inner_loops, blob_update_loop, (hdgmm_state, key))
-    hdgmm_state, key, _ = jax.lax.fori_loop(0, num_gibbs_inner_loops, hyperblob_update_loop, (hdgmm_state, key, use_weighted_blobs))
+    genmatter_state, key = jax.lax.fori_loop(0, num_gibbs_inner_loops, datapoint_update_loop, (genmatter_state, key))
+    genmatter_state, key = jax.lax.fori_loop(0, num_gibbs_inner_loops, blob_update_loop, (genmatter_state, key))
+    genmatter_state, key, _ = jax.lax.fori_loop(0, num_gibbs_inner_loops, hyperblob_update_loop, (genmatter_state, key, use_weighted_blobs))
     
-    return (key, hdgmm_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs), hdgmm_TraceWrapper(force_retval=hdgmm_state)
+    return (key, genmatter_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs), genmatter_TraceWrapper(force_retval=genmatter_state)
 
-def hdgmm_full_gibbs(key, init_hdgmm_state, num_gibbs_sweeps, gibbs_dials, use_weighted_blobs=False, num_gibbs_inner_loops=1):
-    _, stacked_hdgmm_wtrs = jax.lax.scan(f_gibbs_sweep, (key, init_hdgmm_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs), jnp.arange(num_gibbs_sweeps))
-    gibbs_wtrs = HDGMM_Gibbs_TraceWrapper(hdgmm_TraceWrapper(force_retval=init_hdgmm_state), stacked_hdgmm_wtrs)
+def genmatter_full_gibbs(key, init_genmatter_state, num_gibbs_sweeps, gibbs_dials, use_weighted_blobs=False, num_gibbs_inner_loops=1):
+    _, stacked_genmatter_wtrs = jax.lax.scan(f_gibbs_sweep, (key, init_genmatter_state, gibbs_dials, num_gibbs_inner_loops, use_weighted_blobs), jnp.arange(num_gibbs_sweeps))
+    gibbs_wtrs = GenMatter_Gibbs_TraceWrapper(genmatter_TraceWrapper(force_retval=init_genmatter_state), stacked_genmatter_wtrs)
     return gibbs_wtrs
 
 
-def blob_tracking_gibbs(key, hdgmm_state : HDGMM_State):
+def blob_tracking_gibbs(key, genmatter_state : GenMatter_State):
 
     def update_blob_assignments_position_only(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_batched(gibbs_key, hdgmm_state, position_only = True, disable_outlier_prob = True)
+        genmatter_state = gibbs_blob_assignments_batched(gibbs_key, genmatter_state, position_only = True, disable_outlier_prob = True)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_assignments_position_w_outlier(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_batched(gibbs_key, hdgmm_state, position_only = True, disable_outlier_prob = False)
+        genmatter_state = gibbs_blob_assignments_batched(gibbs_key, genmatter_state, position_only = True, disable_outlier_prob = False)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_velocities(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_means(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_velocity_covariances(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_covs(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_vel_covs(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_means_with_prior(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_means(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def hyperblob_update_loop(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_rot(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_rot(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_trans(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_hyperblob_trans(gibbs_key, genmatter_state)
+        return key, genmatter_state
     
     # Increased iterations for better convergence per tracking timestep
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_assignments_position_only, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 10, update_blob_means_with_prior, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_assignments_position_w_outlier, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 10, update_blob_velocities, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 10, update_blob_velocity_covariances, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, hdgmm_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_assignments_position_only, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 10, update_blob_means_with_prior, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_assignments_position_w_outlier, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 10, update_blob_velocities, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 10, update_blob_velocity_covariances, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
     
-    return hdgmm_state
+    return genmatter_state
 
 @jax.jit
 def f_tracking_sweep(carry, timestep_idx):
-    key, hdgmm_state, tracked_points, tracked_motion_vectors = carry
+    key, genmatter_state, tracked_points, tracked_motion_vectors = carry
     
     # Update blob means with velocity
-    next_blob_means = hdgmm_state.blobs_state.blob_vel_means + hdgmm_state.blobs_state.blob_means
-    hdgmm_state = hdgmm_state.replace({'blobs_state': {'blob_means': next_blob_means}})
+    next_blob_means = genmatter_state.blobs_state.blob_vel_means + genmatter_state.blobs_state.blob_means
+    genmatter_state = genmatter_state.replace({'blobs_state': {'blob_means': next_blob_means}})
     
     # Update datapoint positions for current timestep
-    hdgmm_state = hdgmm_state.replace({
+    genmatter_state = genmatter_state.replace({
         'datapoints_state': {
             'datapoint_positions': tracked_points[timestep_idx],
             'datapoint_vels': tracked_motion_vectors[timestep_idx]
@@ -1096,29 +1096,29 @@ def f_tracking_sweep(carry, timestep_idx):
     
     # Run Gibbs sampling
     key, gibbs_key = jax.random.split(key)
-    hdgmm_state = blob_tracking_gibbs(gibbs_key, hdgmm_state)
+    genmatter_state = blob_tracking_gibbs(gibbs_key, genmatter_state)
     
-    return (key, hdgmm_state, tracked_points, tracked_motion_vectors), hdgmm_TraceWrapper(force_retval=hdgmm_state)
+    return (key, genmatter_state, tracked_points, tracked_motion_vectors), genmatter_TraceWrapper(force_retval=genmatter_state)
 
-def hdgmm_tracking_gibbs(key, init_hdgmm_state, tracked_points, tracked_motion_vectors, outlier_prob = 1e-24):
+def genmatter_tracking_gibbs(key, init_genmatter_state, tracked_points, tracked_motion_vectors, outlier_prob = 1e-24):
     # Set outlier probability to very low value
-    init_hdgmm_state = init_hdgmm_state.replace({'hypers': {'outlier_prob': f_(outlier_prob)}})
+    init_genmatter_state = init_genmatter_state.replace({'hypers': {'outlier_prob': f_(outlier_prob)}})
     
     # Create timestep indices (skip the first frame since we already have it)
     timestep_indices = jnp.arange(1, len(tracked_points)-1)
     
     # Run the scan over all timesteps with progress bar
-    _, stacked_hdgmm_wtrs = jax.lax.scan(
+    _, stacked_genmatter_wtrs = jax.lax.scan(
         f_tracking_sweep, 
-        (key, init_hdgmm_state, tracked_points, tracked_motion_vectors), 
+        (key, init_genmatter_state, tracked_points, tracked_motion_vectors), 
         timestep_indices,
         unroll=1
     )
     
     # Create full trace wrapper including initial state
-    tracking_wtrs = HDGMM_Gibbs_TraceWrapper(
-        hdgmm_TraceWrapper(force_retval=init_hdgmm_state), 
-        stacked_hdgmm_wtrs
+    tracking_wtrs = GenMatter_Gibbs_TraceWrapper(
+        genmatter_TraceWrapper(force_retval=init_genmatter_state), 
+        stacked_genmatter_wtrs
     )
     
     return tracking_wtrs

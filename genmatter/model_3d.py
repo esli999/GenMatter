@@ -10,10 +10,10 @@ from .core_types import (
 )
 from .datatypes import Super_Pytree
 
-from .trace_wrappers import __hdgmm_TraceWrapper__, hdgmm_TraceWrapper
+from .trace_wrappers import __genmatter_TraceWrapper__, genmatter_TraceWrapper
 
 @Pytree.dataclass
-class HDGMM_Hyperparams(Super_Pytree):
+class GenMatter_Hyperparams(Super_Pytree):
     outlier_prob: jnp.float32 = Super_Pytree.field()
     outlier_velocity_gamma_shape: jnp.float32 = Super_Pytree.field()
     outlier_velocity_gamma_rate: jnp.float32 = Super_Pytree.field()
@@ -116,7 +116,7 @@ class HDGMM_Hyperparams(Super_Pytree):
 
 
 @Pytree.dataclass
-class HDGMM_Hyperblobs_State(Super_Pytree):
+class GenMatter_Hyperblobs_State(Super_Pytree):
     hyperblob_weights: jnp.ndarray
     hyperblob_means: jnp.ndarray
     hyperblob_covs: jnp.ndarray
@@ -124,7 +124,7 @@ class HDGMM_Hyperblobs_State(Super_Pytree):
     hyperblob_rot_vels: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_Blobs_State(Super_Pytree):
+class GenMatter_Blobs_State(Super_Pytree):
     hyperblob_assignments: jnp.ndarray
     blob_weights: jnp.ndarray
     blob_means: jnp.ndarray
@@ -133,25 +133,25 @@ class HDGMM_Blobs_State(Super_Pytree):
     blob_vel_covs: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_Datapoints_State(Super_Pytree):
+class GenMatter_Datapoints_State(Super_Pytree):
     blob_assignments: jnp.ndarray
     datapoint_positions: jnp.ndarray
     datapoint_vels: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_State(Super_Pytree):
-    hypers: HDGMM_Hyperparams
-    hyperblobs_state: HDGMM_Hyperblobs_State
-    blobs_state: HDGMM_Blobs_State
-    datapoints_state: HDGMM_Datapoints_State
+class GenMatter_State(Super_Pytree):
+    hypers: GenMatter_Hyperparams
+    hyperblobs_state: GenMatter_Hyperblobs_State
+    blobs_state: GenMatter_Blobs_State
+    datapoints_state: GenMatter_Datapoints_State
 
 @gen
-def HDGMM_model_3d(hypers : HDGMM_Hyperparams):
-    hyperblobs_state = HDGMM_hyperblobs_model(hypers) @ 'hyperblobs'
-    blobs_state = HDGMM_blobs_model(hypers, hyperblobs_state) @ 'blobs'
-    datapoints_state = HDGMM_datapoints_model(hypers, blobs_state) @ 'datapoints'
+def GenMatter_model_3d(hypers : GenMatter_Hyperparams):
+    hyperblobs_state = GenMatter_hyperblobs_model(hypers) @ 'hyperblobs'
+    blobs_state = GenMatter_blobs_model(hypers, hyperblobs_state) @ 'blobs'
+    datapoints_state = GenMatter_datapoints_model(hypers, blobs_state) @ 'datapoints'
 
-    return HDGMM_State(
+    return GenMatter_State(
         hypers = hypers,
         hyperblobs_state=hyperblobs_state, 
         blobs_state=blobs_state, 
@@ -159,7 +159,7 @@ def HDGMM_model_3d(hypers : HDGMM_Hyperparams):
     )
 
 @gen
-def HDGMM_hyperblobs_model(hypers : HDGMM_Hyperparams):
+def GenMatter_hyperblobs_model(hypers : GenMatter_Hyperparams):
     sample_shape = Const((hypers.n_hyperblobs,))
     hyperblob_weights = genjax.dirichlet(jnp.repeat(hypers.alpha, hypers.n_hyperblobs)) @ 'hyperblob_weights'
     hyperblob_covs = inverse_wishart(hypers.nu_H, hypers.Psi_H, sample_shape=sample_shape) @ 'hyperblob_covs'
@@ -167,7 +167,7 @@ def HDGMM_hyperblobs_model(hypers : HDGMM_Hyperparams):
     hyperblob_trans_vels = discrete_categorical(hypers.discrete_translation, sample_shape=sample_shape) @ 'hyperblob_trans_vels'
     hyperblob_rot_vels = discrete_categorical(hypers.discrete_rotation, sample_shape=sample_shape) @ 'hyperblob_rot_vels'
 
-    return HDGMM_Hyperblobs_State(
+    return GenMatter_Hyperblobs_State(
         hyperblob_weights = hyperblob_weights,
         hyperblob_means = hyperblob_means,
         hyperblob_covs = hyperblob_covs,
@@ -176,7 +176,7 @@ def HDGMM_hyperblobs_model(hypers : HDGMM_Hyperparams):
     )
 
 @gen
-def HDGMM_blobs_model(hypers : HDGMM_Hyperparams, hyperblobs_state : HDGMM_Hyperblobs_State):
+def GenMatter_blobs_model(hypers : GenMatter_Hyperparams, hyperblobs_state : GenMatter_Hyperblobs_State):
     sample_shape = Const((hypers.n_blobs,))
     hyperblob_assignments = genjax.categorical(probs = hyperblobs_state.hyperblob_weights, sample_shape=sample_shape) @ 'hyperblob_assignments'
     blob_weights = genjax.dirichlet(jnp.repeat(hypers.beta, hypers.n_blobs)) @ 'blob_weights'
@@ -187,7 +187,7 @@ def HDGMM_blobs_model(hypers : HDGMM_Hyperparams, hyperblobs_state : HDGMM_Hyper
     blob_vel_means = genjax.normal(blob_vel_means_, jnp.sqrt(hypers.sigma_V)) @ 'blob_vel_means'
     blob_vel_covs = inverse_wishart(hypers.nu_V, hypers.Psi_V, sample_shape=sample_shape) @ 'blob_vel_covs'
     
-    return HDGMM_Blobs_State(
+    return GenMatter_Blobs_State(
         hyperblob_assignments = hyperblob_assignments,
         blob_weights = blob_weights,
         blob_means = blob_means,
@@ -197,13 +197,13 @@ def HDGMM_blobs_model(hypers : HDGMM_Hyperparams, hyperblobs_state : HDGMM_Hyper
     )
 
 @gen
-def HDGMM_datapoints_model(hypers : HDGMM_Hyperparams, blobs_state : HDGMM_Blobs_State):
+def GenMatter_datapoints_model(hypers : GenMatter_Hyperparams, blobs_state : GenMatter_Blobs_State):
     blob_assignments = genjax.categorical(probs = blobs_state.blob_weights, sample_shape=Const((hypers.n_datapoints,))) @ 'blob_assignments'
     assigned_blob_per_datapoint = blobs_state[blob_assignments]
     datapoint_positions = genjax.mv_normal(assigned_blob_per_datapoint.blob_means, assigned_blob_per_datapoint.blob_covs) @ 'datapoint_positions'
     datapoint_vels = genjax.mv_normal(assigned_blob_per_datapoint.blob_vel_means, assigned_blob_per_datapoint.blob_vel_covs) @ 'datapoint_vels'
 
-    return HDGMM_Datapoints_State(
+    return GenMatter_Datapoints_State(
         blob_assignments = blob_assignments,
         datapoint_positions = datapoint_positions,
         datapoint_vels = datapoint_vels,

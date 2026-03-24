@@ -14,7 +14,7 @@ from genjax import PythonicPytree, exact_density, Pytree, Const
 import tensorflow_probability.substrates.jax as tfp
 tfd = tfp.distributions
 
-from .trace_wrappers import __hdgmm_TraceWrapper__, Super_Pytree
+from .trace_wrappers import __genmatter_TraceWrapper__, Super_Pytree
 from .core_types import (
     Precomputed_DiscreteDistribution, discrete_categorical, discrete_categorical_sample, discrete_categorical_logpdf,
     inverse_wishart, inverse_wishart_sample, inverse_wishart_logpdf, wishart, wishart_sample, wishart_logpdf,
@@ -73,11 +73,11 @@ def pytree_slice(pytree: T, idx: Union[int, slice, jnp.ndarray, Tuple]) -> T:
 
 
 @Pytree.dataclass
-class HDGMM_Gibbs_TraceWrapper(Super_Pytree):
-    wtrs: list[__hdgmm_TraceWrapper__]
-    def __init__(self, init_hdgmm_wtr, stacked_hdgmm_wtrs):
-        self.wtrs = pytree_concat([init_hdgmm_wtr.expand_dims(0), stacked_hdgmm_wtrs])
-        # self.wtrs = [init_hdgmm_wtr, *stacked_hdgmm_wtrs.unstack()]
+class GenMatter_Gibbs_TraceWrapper(Super_Pytree):
+    wtrs: list[__genmatter_TraceWrapper__]
+    def __init__(self, init_genmatter_wtr, stacked_genmatter_wtrs):
+        self.wtrs = pytree_concat([init_genmatter_wtr.expand_dims(0), stacked_genmatter_wtrs])
+        # self.wtrs = [init_genmatter_wtr, *stacked_genmatter_wtrs.unstack()]
 
     def __getitem__(self, i):
         return self.wtrs[i]
@@ -91,4 +91,4 @@ class HDGMM_Gibbs_TraceWrapper(Super_Pytree):
     def __next__(self):
         return next(self.wtrs)
 
-from .model_3d import HDGMM_State, HDGMM_Hyperblobs_State, HDGMM_Blobs_State, HDGMM_Datapoints_State, HDGMM_Hyperparams
+from .model_3d import GenMatter_State, GenMatter_Hyperblobs_State, GenMatter_Blobs_State, GenMatter_Datapoints_State, GenMatter_Hyperparams

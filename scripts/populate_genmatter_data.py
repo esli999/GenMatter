@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Copy Gestalt inputs into ``genmatter_data/assets/`` from a source tree that has
+Copy Gestalt inputs into ``<GENMATTER_DATA_DIR>/assets/gestalt_stimuli/`` (default: ``assets/gestalt_stimuli/``) from a source tree that has
 ``from_thomas/`` plus full-length RAFT ``*.npz`` (defaults: real ``<repo>/assets``
 and ``<repo>/raft_flows``, else ``GENMATTER_LEGACY_DATA_ROOT`` when set; see ``config.py``).
 
@@ -172,7 +172,7 @@ def main() -> None:
     print()
 
     if not args.dry_run:
-        config.GENMATTER_LOCAL_ASSETS.mkdir(parents=True, exist_ok=True)
+        config.GESTALT_STIMULI_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.raft_only:
         populate_minimal_raft(raft_src, args.dry_run)

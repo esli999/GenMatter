@@ -1,6 +1,6 @@
 """Postprocess Gestalt ablation results.
 
-Compares baseline HDGMM (full depth) vs depth-ablation HDGMM results
+Compares baseline GenMatter (full depth) vs depth-ablation GenMatter results
 across all Gestalt scenes and textures. Computes probe-point segmentation
 metrics (accuracy, Jaccard, precision, recall, F1) and outputs summary
 statistics as JSON and CSV.
@@ -45,7 +45,7 @@ def load_ground_truth_mask(scene: str, frame_idx: int) -> np.ndarray | None:
     return mask_img > 127
 
 
-def load_hdgmm_mask(
+def load_genmatter_mask(
     scene: str,
     texture: str,
     frame_idx: int,
@@ -187,8 +187,8 @@ def evaluate_frame(
     texture_num = int(texture.split("_")[1])
     eval_seed = random_seed + scene_num * 1000 + texture_num * 10 + frame_idx
 
-    baseline_mask = load_hdgmm_mask(scene, texture, frame_idx, config.GESTALT_OUTPUT_DIR)
-    ablation_mask = load_hdgmm_mask(scene, texture, frame_idx, config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR)
+    baseline_mask = load_genmatter_mask(scene, texture, frame_idx, config.GESTALT_OUTPUT_DIR)
+    ablation_mask = load_genmatter_mask(scene, texture, frame_idx, config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR)
 
     target_size = 96
     if baseline_mask is not None:

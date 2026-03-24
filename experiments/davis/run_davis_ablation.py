@@ -1,4 +1,4 @@
-# HDGMM Tracking with DINO Features - Batch Processing
+# GenMatter Tracking with DINO Features - Batch Processing
 # Clean implementation for running experiments on multiple videos
 
 import os
@@ -76,7 +76,7 @@ RANDOM_SEED = 42
 # ============================================================================
 
 @Pytree.dataclass
-class HDGMM_Hyperparams_DINO(Super_Pytree):
+class GenMatter_Hyperparams_DINO(Super_Pytree):
     outlier_prob: jnp.float32 = Super_Pytree.field()
     outlier_velocity_gamma_shape: jnp.float32 = Super_Pytree.field()
     outlier_velocity_gamma_rate: jnp.float32 = Super_Pytree.field()
@@ -117,10 +117,10 @@ class HDGMM_Hyperparams_DINO(Super_Pytree):
 
     @classmethod
     def create(cls, **kwargs):
-        return HDGMM_Hyperparams.create.__func__(cls, **kwargs)
+        return GenMatter_Hyperparams.create.__func__(cls, **kwargs)
 
 @Pytree.dataclass
-class HDGMM_Blobs_State_DINO(Super_Pytree):
+class GenMatter_Blobs_State_DINO(Super_Pytree):
     hyperblob_assignments: jnp.ndarray
     blob_weights: jnp.ndarray
     blob_means: jnp.ndarray
@@ -130,25 +130,25 @@ class HDGMM_Blobs_State_DINO(Super_Pytree):
     blob_features: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_Datapoints_State_DINO(Super_Pytree):
+class GenMatter_Datapoints_State_DINO(Super_Pytree):
     blob_assignments: jnp.ndarray
     datapoint_positions: jnp.ndarray
     datapoint_vels: jnp.ndarray
     datapoint_features: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_State_DINO(Super_Pytree):
-    hypers: HDGMM_Hyperparams_DINO
-    hyperblobs_state: HDGMM_Hyperblobs_State
-    blobs_state: HDGMM_Blobs_State_DINO
-    datapoints_state: HDGMM_Datapoints_State_DINO
+class GenMatter_State_DINO(Super_Pytree):
+    hypers: GenMatter_Hyperparams_DINO
+    hyperblobs_state: GenMatter_Hyperblobs_State
+    blobs_state: GenMatter_Blobs_State_DINO
+    datapoints_state: GenMatter_Datapoints_State_DINO
 
 @gen
-def HDGMM_model_dino(hypers: HDGMM_Hyperparams_DINO):
-    hyperblobs_state = HDGMM_hyperblobs_model(hypers) @ 'hyperblobs'
-    blobs_state = HDGMM_blobs_model_dino(hypers, hyperblobs_state) @ 'blobs'
-    datapoints_state = HDGMM_datapoints_model_dino(hypers, blobs_state) @ 'datapoints'
-    return HDGMM_State_DINO(
+def GenMatter_model_dino(hypers: GenMatter_Hyperparams_DINO):
+    hyperblobs_state = GenMatter_hyperblobs_model(hypers) @ 'hyperblobs'
+    blobs_state = GenMatter_blobs_model_dino(hypers, hyperblobs_state) @ 'blobs'
+    datapoints_state = GenMatter_datapoints_model_dino(hypers, blobs_state) @ 'datapoints'
+    return GenMatter_State_DINO(
         hypers=hypers,
         hyperblobs_state=hyperblobs_state,
         blobs_state=blobs_state,
@@ -156,7 +156,7 @@ def HDGMM_model_dino(hypers: HDGMM_Hyperparams_DINO):
     )
 
 @gen
-def HDGMM_blobs_model_dino(hypers: HDGMM_Hyperparams_DINO, hyperblobs_state: HDGMM_Hyperblobs_State):
+def GenMatter_blobs_model_dino(hypers: GenMatter_Hyperparams_DINO, hyperblobs_state: GenMatter_Hyperblobs_State):
     sample_shape = Const((hypers.n_blobs,))
     hyperblob_assignments = genjax.categorical(
         probs=hyperblobs_state.hyperblob_weights,
@@ -177,7 +177,7 @@ def HDGMM_blobs_model_dino(hypers: HDGMM_Hyperparams_DINO, hyperblobs_state: HDG
     blob_vel_means = genjax.normal(blob_vel_means_, jnp.sqrt(hypers.sigma_V)) @ 'blob_vel_means'
     blob_vel_covs = inverse_wishart(hypers.nu_V, hypers.Psi_V, sample_shape=sample_shape) @ 'blob_vel_covs'
     blob_features = genjax.normal(hypers.mu_F, jnp.sqrt(hypers.sigma_F_prior**2)) @ 'blob_features'
-    return HDGMM_Blobs_State_DINO(
+    return GenMatter_Blobs_State_DINO(
         hyperblob_assignments=hyperblob_assignments,
         blob_weights=blob_weights,
         blob_means=blob_means,
@@ -188,7 +188,7 @@ def HDGMM_blobs_model_dino(hypers: HDGMM_Hyperparams_DINO, hyperblobs_state: HDG
     )
 
 @gen
-def HDGMM_datapoints_model_dino(hypers: HDGMM_Hyperparams_DINO, blobs_state: HDGMM_Blobs_State_DINO):
+def GenMatter_datapoints_model_dino(hypers: GenMatter_Hyperparams_DINO, blobs_state: GenMatter_Blobs_State_DINO):
     blob_assignments = genjax.categorical(
         probs=blobs_state.blob_weights,
         sample_shape=Const((hypers.n_datapoints,))
@@ -206,7 +206,7 @@ def HDGMM_datapoints_model_dino(hypers: HDGMM_Hyperparams_DINO, blobs_state: HDG
         assigned_blob_per_datapoint.blob_features,
         jnp.sqrt(hypers.sigma_F)
     ) @ 'datapoint_features'
-    return HDGMM_Datapoints_State_DINO(
+    return GenMatter_Datapoints_State_DINO(
         blob_assignments=blob_assignments,
         datapoint_positions=datapoint_positions,
         datapoint_vels=datapoint_vels,
@@ -214,15 +214,15 @@ def HDGMM_datapoints_model_dino(hypers: HDGMM_Hyperparams_DINO, blobs_state: HDG
     )
 
 @gen
-def blob_datapoint_likelihood_model_dino(blob_state: HDGMM_Blobs_State_DINO, sigma_F: jnp.float32):
+def blob_datapoint_likelihood_model_dino(blob_state: GenMatter_Blobs_State_DINO, sigma_F: jnp.float32):
     datapoint_position = genjax.mv_normal(blob_state.blob_means, blob_state.blob_covs) @ 'datapoint_position'
     datapoint_vel = genjax.mv_normal(blob_state.blob_vel_means, blob_state.blob_vel_covs) @ 'datapoint_vel'
     datapoint_feature = genjax.normal(blob_state.blob_features, jnp.sqrt(sigma_F)) @ 'datapoint_feature'
     return None
 
 # JIT compile
-model_jsimulate = jax.jit(HDGMM_model_dino.simulate)
-model_jimportance = jax.jit(HDGMM_model_dino.importance)
+model_jsimulate = jax.jit(GenMatter_model_dino.simulate)
+model_jimportance = jax.jit(GenMatter_model_dino.importance)
 
 # ============================================================================
 # Helper Functions
@@ -333,15 +333,15 @@ def initialize_model_with_dino(tracked_points, num_blobs, num_hyperblobs,
 # Inference Functions
 # ============================================================================
 
-def gibbs_blob_features_dino(key, hdgmm_state):
+def gibbs_blob_features_dino(key, genmatter_state):
     """Gibbs update for blob DINO features."""
     posterior_key, _ = jax.random.split(key)
-    datapoint_features = hdgmm_state.datapoints_state.datapoint_features
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
-    mu_F = hdgmm_state.hypers.mu_F
-    sigma_F_prior = hdgmm_state.hypers.sigma_F_prior
-    sigma_F = hdgmm_state.hypers.sigma_F
-    L = hdgmm_state.hypers.n_blobs
+    datapoint_features = genmatter_state.datapoints_state.datapoint_features
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments
+    mu_F = genmatter_state.hypers.mu_F
+    sigma_F_prior = genmatter_state.hypers.sigma_F_prior
+    sigma_F = genmatter_state.hypers.sigma_F
+    L = genmatter_state.hypers.n_blobs
 
     N_l = jax.ops.segment_sum(jnp.ones(datapoint_features.shape[0]), blob_assignments, num_segments=L)
     S_l = stable_segment_sum(datapoint_features, blob_assignments, L)
@@ -355,10 +355,10 @@ def gibbs_blob_features_dino(key, hdgmm_state):
     posterior_mean = jnp.where(has_points[:, None], posterior_mean, mu_F[None, :])
     posterior_std = jnp.where(has_points[:, None], posterior_std, sigma_F_prior[None, :])
     new_blob_features = genjax.normal.sample(posterior_key, posterior_mean, posterior_std)
-    return hdgmm_state.replace({'blobs_state': {'blob_features': new_blob_features}})
+    return genmatter_state.replace({'blobs_state': {'blob_features': new_blob_features}})
 
 @jax.jit
-def dense_eval_blob_assignments(key, hdgmm_state, dense_positions, dense_vels, dense_features,
+def dense_eval_blob_assignments(key, genmatter_state, dense_positions, dense_vels, dense_features,
                                 disable_outlier_prob=False):
     """Dense evaluation of blob assignments."""
     from genjax import ChoiceMapBuilder as C
@@ -366,13 +366,13 @@ def dense_eval_blob_assignments(key, hdgmm_state, dense_positions, dense_vels, d
     posterior_key, _ = jax.random.split(key)
     batch_size = 975
 
-    hypers = hdgmm_state.hypers
+    hypers = genmatter_state.hypers
     num_blobs = hypers.n_blobs
     num_datapoints = dense_positions.shape[0]
     datapoint_positions = dense_positions
     datapoint_vels = dense_vels
     datapoint_features = dense_features
-    blobs_state = hdgmm_state.blobs_state
+    blobs_state = genmatter_state.blobs_state
 
     blob_weights = blobs_state.blob_weights
     outlier_prob = jnp.where(disable_outlier_prob, 0.0, hypers.outlier_prob)
@@ -423,12 +423,12 @@ def dense_eval_blob_assignments(key, hdgmm_state, dense_positions, dense_vels, d
     return dense_eval_assignments
 
 @jax.jit
-def dense_eval_blob_weights(key, hdgmm_state : HDGMM_State, dense_assignments : jnp.ndarray): 
+def dense_eval_blob_weights(key, genmatter_state : GenMatter_State, dense_assignments : jnp.ndarray): 
     posterior_key, _ = jax.random.split(key)
 
     # Get the data and parameters from the trace
-    num_blobs = hdgmm_state.hypers.n_blobs
-    prior_beta = hdgmm_state.hypers.beta
+    num_blobs = genmatter_state.hypers.n_blobs
+    prior_beta = genmatter_state.hypers.beta
     blob_idxs = dense_assignments  # [N]
 
     # Compute counts via segment_sum
@@ -446,7 +446,7 @@ def dense_eval_blob_weights(key, hdgmm_state : HDGMM_State, dense_assignments : 
 
     return new_blob_weights
 
-def gibbs_blob_assignments_dino(key, hdgmm_state, position_only=False,
+def gibbs_blob_assignments_dino(key, genmatter_state, position_only=False,
                                 velocity_only=False, disable_outlier_prob=False, feature_only=False):
     """Gibbs update for blob assignments with DINO feature likelihood."""
     from genjax import ChoiceMapBuilder as C
@@ -454,13 +454,13 @@ def gibbs_blob_assignments_dino(key, hdgmm_state, position_only=False,
     posterior_key, _ = jax.random.split(key)
     batch_size = 975
 
-    hypers = hdgmm_state.hypers
+    hypers = genmatter_state.hypers
     num_blobs = hypers.n_blobs
     num_datapoints = hypers.n_datapoints
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions
-    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
-    datapoint_features = hdgmm_state.datapoints_state.datapoint_features
-    blobs_state = hdgmm_state.blobs_state
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    datapoint_features = genmatter_state.datapoints_state.datapoint_features
+    blobs_state = genmatter_state.blobs_state
 
     gibbs_blob_vel_covs = jnp.where(
         jnp.logical_or(position_only, feature_only),
@@ -523,95 +523,95 @@ def gibbs_blob_assignments_dino(key, hdgmm_state, position_only=False,
     all_logprobs = batched_logprobs.reshape(num_full_batches * batch_size, -1)
     updated_assignments = genjax.categorical.sample(posterior_key, logits=all_logprobs)
 
-    return hdgmm_state.replace({
+    return genmatter_state.replace({
         'datapoints_state': {'blob_assignments': updated_assignments}
     })
 
-def blob_tracking_gibbs_dino(key, hdgmm_state):
+def blob_tracking_gibbs_dino(key, genmatter_state):
     """Single-frame Gibbs updates."""
     def update_blob_assignments_position_only(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_dino(
-            gibbs_key, hdgmm_state, position_only=True, disable_outlier_prob=True
+        genmatter_state = gibbs_blob_assignments_dino(
+            gibbs_key, genmatter_state, position_only=True, disable_outlier_prob=True
         )
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_assignments_with_outlier(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_dino(
-            gibbs_key, hdgmm_state, position_only=True, disable_outlier_prob=False
+        genmatter_state = gibbs_blob_assignments_dino(
+            gibbs_key, genmatter_state, position_only=True, disable_outlier_prob=False
         )
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_velocities(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_means(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_velocity_covariances(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_covs(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_vel_covs(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_means(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_means(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_features_dino(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_features_dino(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_features_dino(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def hyperblob_update_loop(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_rot(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_rot(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_trans(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_hyperblob_trans(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, hdgmm_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
     # # added this to see if it helps below
-    # key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_assignments_feature_only, (key, hdgmm_state))
+    # key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_assignments_feature_only, (key, genmatter_state))
     # # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    key, hdgmm_state = jax.lax.fori_loop(0, 1, update_blob_assignments_position_only, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 15, update_blob_means, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 1, update_blob_assignments_with_outlier, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 15, update_blob_velocities, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 15, update_blob_velocity_covariances, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, hdgmm_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_position_only, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_means, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_with_outlier, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocities, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocity_covariances, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
 
     
-    return hdgmm_state
+    return genmatter_state
 
-def hdgmm_tracking_gibbs_dino(key, init_hdgmm_state, tracked_points,
+def genmatter_tracking_gibbs_dino(key, init_genmatter_state, tracked_points,
                               tracked_motion_vectors, tracked_features, outlier_prob):
     """Track over time with DINO features."""
-    init_hdgmm_state = init_hdgmm_state.replace({'hypers': {'outlier_prob': f_(outlier_prob)}})
+    init_genmatter_state = init_genmatter_state.replace({'hypers': {'outlier_prob': f_(outlier_prob)}})
 
     @jax.jit
     def f_tracking_sweep(carry, timestep_idx):
-        key, hdgmm_state, tracked_points, tracked_motion_vectors, tracked_features = carry
-        next_blob_means = hdgmm_state.blobs_state.blob_vel_means + hdgmm_state.blobs_state.blob_means
-        hdgmm_state = hdgmm_state.replace({'blobs_state': {'blob_means': next_blob_means}})
-        hdgmm_state = hdgmm_state.replace({
+        key, genmatter_state, tracked_points, tracked_motion_vectors, tracked_features = carry
+        next_blob_means = genmatter_state.blobs_state.blob_vel_means + genmatter_state.blobs_state.blob_means
+        genmatter_state = genmatter_state.replace({'blobs_state': {'blob_means': next_blob_means}})
+        genmatter_state = genmatter_state.replace({
             'datapoints_state': {
                 'datapoint_positions': tracked_points[timestep_idx],
                 'datapoint_vels': tracked_motion_vectors[timestep_idx],
@@ -619,45 +619,45 @@ def hdgmm_tracking_gibbs_dino(key, init_hdgmm_state, tracked_points,
             }
         })
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = blob_tracking_gibbs_dino(gibbs_key, hdgmm_state)
-        return (key, hdgmm_state, tracked_points, tracked_motion_vectors, tracked_features), \
-               hdgmm_TraceWrapper(force_retval=hdgmm_state)
+        genmatter_state = blob_tracking_gibbs_dino(gibbs_key, genmatter_state)
+        return (key, genmatter_state, tracked_points, tracked_motion_vectors, tracked_features), \
+               genmatter_TraceWrapper(force_retval=genmatter_state)
 
     timestep_indices = jnp.arange(1, len(tracked_points))
-    _, stacked_hdgmm_wtrs = jax.lax.scan(
+    _, stacked_genmatter_wtrs = jax.lax.scan(
         f_tracking_sweep,
-        (key, init_hdgmm_state, tracked_points, tracked_motion_vectors, tracked_features),
+        (key, init_genmatter_state, tracked_points, tracked_motion_vectors, tracked_features),
         timestep_indices,
         unroll=1
     )
 
-    return HDGMM_Gibbs_TraceWrapper(
-        hdgmm_TraceWrapper(force_retval=init_hdgmm_state),
-        stacked_hdgmm_wtrs
+    return GenMatter_Gibbs_TraceWrapper(
+        genmatter_TraceWrapper(force_retval=init_genmatter_state),
+        stacked_genmatter_wtrs
     )
 
-def init_gibbs_sweep_dino(key, hdgmm_state, num_sweeps=30):
+def init_gibbs_sweep_dino(key, genmatter_state, num_sweeps=30):
     """Custom Gibbs sweeps for DINO initialization."""
     def gibbs_iteration(carry, i):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_dino(gibbs_key, hdgmm_state, position_only=True, disable_outlier_prob=True)
+        genmatter_state = gibbs_blob_assignments_dino(gibbs_key, genmatter_state, position_only=True, disable_outlier_prob=True)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_vel_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_features_dino(gibbs_key, hdgmm_state)
-        return (key, hdgmm_state), hdgmm_TraceWrapper(force_retval=hdgmm_state)
+        genmatter_state = gibbs_blob_features_dino(gibbs_key, genmatter_state)
+        return (key, genmatter_state), genmatter_TraceWrapper(force_retval=genmatter_state)
 
-    (key, final_state), traces = jax.lax.scan(gibbs_iteration, (key, hdgmm_state), jnp.arange(num_sweeps))
-    return HDGMM_Gibbs_TraceWrapper(hdgmm_TraceWrapper(force_retval=hdgmm_state), traces)
+    (key, final_state), traces = jax.lax.scan(gibbs_iteration, (key, genmatter_state), jnp.arange(num_sweeps))
+    return GenMatter_Gibbs_TraceWrapper(genmatter_TraceWrapper(force_retval=genmatter_state), traces)
 
 # ============================================================================
 # Evaluation Functions
@@ -1221,7 +1221,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         ) / len(roi_blob_indices)
         empirical_nu_B = empirical_nu_V = f_(int(mean_points_per_roi_blob))
 
-        hypers = HDGMM_Hyperparams_DINO.create(
+        hypers = GenMatter_Hyperparams_DINO.create(
             mu_F=jnp.array(gaussian_means),
             sigma_F_prior=jnp.array(gaussian_stds),
             # sigma_F=f_(20.0),
@@ -1257,21 +1257,21 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         key = jkey(RANDOM_SEED)
         key, key_importance = jax.random.split(key)
         init_tr, _ = model_jimportance(key_importance, kmeans_chm, (hypers,))
-        init_hdgmm_state = init_tr.get_retval()
+        init_genmatter_state = init_tr.get_retval()
 
         # Initial Gibbs sweeps
         key, init_gibbs_key = jax.random.split(key)
         print("Running initial Gibbs sweeps...")
-        gibbs_wtrs = init_gibbs_sweep_dino(init_gibbs_key, init_hdgmm_state, num_sweeps=15)
-        init_hdgmm_state = gibbs_wtrs[-1].retval
+        gibbs_wtrs = init_gibbs_sweep_dino(init_gibbs_key, init_genmatter_state, num_sweeps=15)
+        init_genmatter_state = gibbs_wtrs[-1].retval
 
         # # Post-Gibbs filtering (gets ignored if USE_SAM_FRAME0 is True)
         # fx = fy = FOCAL_LENGTH
         # cx = img_dims[1] / 2.0
         # cy = img_dims[0] / 2.0
 
-        # blob_means_after_gibbs = np.array(init_hdgmm_state.blobs_state.blob_means)
-        # hyperblob_assignments_after_gibbs = np.array(init_hdgmm_state.blobs_state.hyperblob_assignments)
+        # blob_means_after_gibbs = np.array(init_genmatter_state.blobs_state.blob_means)
+        # hyperblob_assignments_after_gibbs = np.array(init_genmatter_state.blobs_state.hyperblob_assignments)
 
         # x_2d = (blob_means_after_gibbs[:, 0] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fx + cx
         # y_2d = (blob_means_after_gibbs[:, 1] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fy + cy
@@ -1279,7 +1279,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         # y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
         # pixel_indices = y_2d * img_dims[1] + x_2d
 
-        # blob_assignments_frame0 = np.array(init_hdgmm_state.datapoints_state.blob_assignments)
+        # blob_assignments_frame0 = np.array(init_genmatter_state.datapoints_state.blob_assignments)
         # n_blobs_after_gibbs = len(blob_means_after_gibbs)
         # valid_mask = blob_assignments_frame0 < n_blobs_after_gibbs
         # datapoint_to_hyperblob = np.full(len(blob_assignments_frame0), -1, dtype=int)
@@ -1311,7 +1311,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         #         updated_hyperblob_assignments = jnp.array(hyperblob_assignments_after_gibbs)
         #         for blob_idx in blobs_to_reassign:
         #             updated_hyperblob_assignments = updated_hyperblob_assignments.at[blob_idx].set(target_background_hb)
-        #         init_hdgmm_state = init_hdgmm_state.replace({
+        #         init_genmatter_state = init_genmatter_state.replace({
         #             'blobs_state': {'hyperblob_assignments': updated_hyperblob_assignments}
         #         })
 
@@ -1324,8 +1324,8 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         if MEASURE_FPS:
             # First run to trigger JIT compilation (not timed)
             print("JIT compiling tracking function...")
-            _ = hdgmm_tracking_gibbs_dino(
-                tracking_key, init_hdgmm_state,
+            _ = genmatter_tracking_gibbs_dino(
+                tracking_key, init_genmatter_state,
                 tracked_points, tracked_motion_vectors, tracked_features,
                 outlier_prob=1e-28
             )
@@ -1333,8 +1333,8 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             # Second run for timing (after JIT compilation)
             print("Measuring FPS after JIT compilation...")
             start_time = time.time()
-            tracking_wtrs = hdgmm_tracking_gibbs_dino(
-                tracking_key, init_hdgmm_state,
+            tracking_wtrs = genmatter_tracking_gibbs_dino(
+                tracking_key, init_genmatter_state,
                 tracked_points, tracked_motion_vectors, tracked_features,
                 outlier_prob=1e-28
             )
@@ -1346,8 +1346,8 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             fps = num_frames / total_time if total_time > 0 else 0.0
             print(f"Tracking FPS: {fps:.2f} frames/second (total time: {total_time:.2f}s for {num_frames} frames)")
         else:
-            tracking_wtrs = hdgmm_tracking_gibbs_dino(
-                tracking_key, init_hdgmm_state,
+            tracking_wtrs = genmatter_tracking_gibbs_dino(
+                tracking_key, init_genmatter_state,
                 tracked_points, tracked_motion_vectors, tracked_features,
                 outlier_prob=1e-28
             )
@@ -1363,7 +1363,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             key, dense_eval_assignments_key = jax.random.split(key)
             dense_eval_assignments = dense_eval_blob_assignments(
                 key=dense_eval_assignments_key, 
-                hdgmm_state=frame.retval, 
+                genmatter_state=frame.retval, 
                 dense_positions=tracked_points_full[frame_idx], 
                 dense_vels=tracked_motion_vectors_full[frame_idx], 
                 dense_features=tracked_features_full[frame_idx], 
@@ -1374,7 +1374,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             key, dense_eval_weights_key = jax.random.split(key)
             dense_eval_weights = dense_eval_blob_weights(
                 key=dense_eval_weights_key, 
-                hdgmm_state=frame.retval, 
+                genmatter_state=frame.retval, 
                 dense_assignments=dense_eval_assignments
             )
             frame_data = {
@@ -1548,7 +1548,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         # These are no longer needed after creating the result
         del tracking_wtrs
         del gibbs_wtrs
-        del init_hdgmm_state
+        del init_genmatter_state
         del all_results
         del segmentation_masks
         

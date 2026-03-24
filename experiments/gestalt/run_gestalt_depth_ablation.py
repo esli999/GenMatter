@@ -24,7 +24,7 @@ from jax.scipy.ndimage import map_coordinates
 
 # Import from experiments.gestalt.algorithm
 from experiments.gestalt.algorithm import (
-    HDGMM_model_3d, resize_to_square, load_gestalt_data,
+    GenMatter_model_3d, resize_to_square, load_gestalt_data,
     compute_3d_points_and_motion, extract_gestalt_segmentation
 )
 
@@ -37,8 +37,8 @@ from genmatter.dataloader import *
 from genmatter.utils import *
 
 # JIT compile model functions
-model_jsimulate = jax.jit(HDGMM_model_3d.simulate)
-model_jimportance = jax.jit(HDGMM_model_3d.importance)
+model_jsimulate = jax.jit(GenMatter_model_3d.simulate)
+model_jimportance = jax.jit(GenMatter_model_3d.importance)
 
 # Configuration
 EXPERIMENT_NAME = "Video_Gestalt_Mask_Propagation_No_Depth_Ablation_Flow_Init"
@@ -434,12 +434,12 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
     key = jkey(random_seed)
     key, key_importance = jax.random.split(key)
     init_tr, _ = model_jimportance(key_importance, kmeans_chm, (hypers,))
-    init_hdgmm_state = init_tr.get_retval()
+    init_genmatter_state = init_tr.get_retval()
 
     # Run initial Gibbs sweeps on first frame
     key, init_gibbs_key = jax.random.split(key)
-    gibbs_wtrs = hdgmm_full_gibbs(
-        init_gibbs_key, init_hdgmm_state, NUM_INITIAL_GIBBS_ITERATIONS,
+    gibbs_wtrs = genmatter_full_gibbs(
+        init_gibbs_key, init_genmatter_state, NUM_INITIAL_GIBBS_ITERATIONS,
         GIBBS_DIALS, use_weighted_blobs=True, num_gibbs_inner_loops=NUM_GIBBS_INNER_LOOPS
     )
 
@@ -559,13 +559,13 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
         # Initialize with propagated state
         key, frame_key_importance = jax.random.split(key)
         frame_init_tr, _ = model_jimportance(frame_key_importance, propagated_chm, (current_state.hypers,))
-        frame_init_hdgmm_state = frame_init_tr.get_retval()
+        frame_init_genmatter_state = frame_init_tr.get_retval()
 
         # STEP 1: Update velocities first
         key, velocity_gibbs_key = jax.random.split(key)
-        velocity_update_wtrs = hdgmm_full_gibbs(
+        velocity_update_wtrs = genmatter_full_gibbs(
             velocity_gibbs_key,
-            frame_init_hdgmm_state,
+            frame_init_genmatter_state,
             NUM_VELOCITY_UPDATE_ITERATIONS,
             VELOCITY_UPDATE_DIALS,
             use_weighted_blobs=True,
@@ -594,7 +594,7 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
                 C['datapoints', 'datapoint_positions'].set(state.datapoints_state.datapoint_positions) |
                 C['datapoints', 'datapoint_vels'].set(state.datapoints_state.datapoint_vels)
             )
-            weight, _ = HDGMM_model_3d.assess(chm, (state.hypers,))
+            weight, _ = GenMatter_model_3d.assess(chm, (state.hypers,))
             velocity_log_probs.append(float(weight))
 
         best_velocity_idx = np.argmax(velocity_log_probs) * velocity_sample_freq
@@ -602,7 +602,7 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
 
         # STEP 2: Full Gibbs sampling
         key, frame_gibbs_key = jax.random.split(key)
-        frame_gibbs_wtrs = hdgmm_full_gibbs(
+        frame_gibbs_wtrs = genmatter_full_gibbs(
             frame_gibbs_key,
             velocity_updated_state,
             NUM_TRACKING_GIBBS_ITERATIONS,
@@ -641,7 +641,7 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
                 C['datapoints', 'datapoint_positions'].set(state.datapoints_state.datapoint_positions) |
                 C['datapoints', 'datapoint_vels'].set(state.datapoints_state.datapoint_vels)
             )
-            weight, _ = HDGMM_model_3d.assess(chm, (state.hypers,))
+            weight, _ = GenMatter_model_3d.assess(chm, (state.hypers,))
             full_log_probs.append(float(weight))
 
         best_full_idx = np.argmax(full_log_probs) * full_sample_freq
@@ -794,7 +794,7 @@ def run_experiment_for_scene_texture(scene, texture):
         mean_points_per_roi_blob = jnp.sum(jnp.isin(kmeans_chm['datapoints', 'blob_assignments'], roi_blob_indices)) / len(roi_blob_indices)
         empirical_nu_B = empirical_nu_V = f_(int(mean_points_per_roi_blob))
 
-        hypers = HDGMM_Hyperparams.create(
+        hypers = GenMatter_Hyperparams.create(
             outlier_prob=f_(0.001),
             outlier_velocity_gamma_shape=f_(7.5),
             outlier_velocity_gamma_rate=f_(0.5),

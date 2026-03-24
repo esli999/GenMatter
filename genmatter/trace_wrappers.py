@@ -83,7 +83,7 @@ def pytree_slice(pytree: T, idx: Union[int, slice, jnp.ndarray, Tuple]) -> T:
     return jtu.tree_map(lambda x: x[idx], pytree)
 
 @Pytree.dataclass
-class __hdgmm_TraceWrapper__(Super_Pytree):
+class __genmatter_TraceWrapper__(Super_Pytree):
     retval: any
     log_likelihood_: any
     
@@ -212,7 +212,7 @@ class __hdgmm_TraceWrapper__(Super_Pytree):
 from genjax import Pytree
 
 @Pytree.dataclass(init=True, has_implicitly_inherited_fields=True)
-class hdgmm_TraceWrapper(__hdgmm_TraceWrapper__):
+class genmatter_TraceWrapper(__genmatter_TraceWrapper__):
     def __init__(self, trace = None, force_retval=None, force_log_likelihood=None):
         super().__init__(trace, force_retval, force_log_likelihood)
         self.log_likelihood_ = self.extract_log_likelihood(trace) if force_log_likelihood is None else force_log_likelihood
