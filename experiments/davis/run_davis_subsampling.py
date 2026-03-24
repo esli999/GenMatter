@@ -1256,9 +1256,8 @@ if __name__ == "__main__":
         print(f"FPS measurement: DISABLED")
     print(f"{'='*80}\n")
 
-    subsampling_percentages = [12.5, 6.25, 3.125, 1.5625, 0.78125, 0.390625, 0.1953125, 0.09765625]
-    # subsampling_percentages = [100.0, 50.0, 25.0, 12.5, 6.25, 3.125, 1.5625, 0.78125]
-    # subsampling_percentages = [3.125, 1.5625, 0.78125]
+    # Fraction of grid points kept: 1/8, 1/32, 1/128, 1/512
+    subsampling_percentages = [12.5, 3.125, 0.78125, 0.1953125]
 
     for video_name in tqdm(VIDEO_NAMES, desc="Overall Progress", position=0):
         for percentage in subsampling_percentages:
