@@ -1,8 +1,9 @@
 """DAVIS tracking postprocessing: compare GenMatter, CoTracker, and subsampling curves.
 
 Loads per-video JSON results from DAVIS tracking (SAM init by default), SAM and
-no-SAM subsampling runs, and CoTracker.  Extracts matter-weighted Jaccard, precision, recall,
-F1, FPS, FPR, FNR per video, aggregates across videos, and writes:
+no-SAM subsampling runs, and CoTracker.  Extracts **matter-weighted Jaccard (fixed
+frame-0 weights)** as the GenMatter metric, plus FPS and particle FP/FN rates, aggregates
+across videos, and writes:
 
 - results/postprocessing/davis_comparison.json   (all methods side-by-side)
 - results/postprocessing/davis_subsampling_tradeoff.json  (subsample % vs perf)
@@ -173,24 +174,16 @@ def _extract_dino_metrics(data: dict) -> dict[str, Any]:
     """Extract a uniform metrics dict from either per-video or subsampling JSON."""
     pm = data.get("pixel_metrics", {})
 
-    matter_jaccard = (
+    # Primary GenMatter DAVIS metrics: matter-weighted R/P/J with frame-0 blob weights
+    matter_jaccard_fixed = (
         pm.get("avg_matter_weighted_jaccard_fixed")
         or data.get("particle_count_matter_fixed_jaccard")
     )
-    matter_recall = (
-        pm.get("avg_matter_weighted_recall_fixed")
-        or data.get("matter_weighted_recall_fixed")
-        or data.get("particle_count_matter_fixed_recall")
+    matter_recall_fixed = pm.get("avg_matter_weighted_recall_fixed") or data.get(
+        "particle_count_matter_fixed_recall"
     )
-    matter_precision = (
-        pm.get("avg_matter_weighted_precision_fixed")
-        or data.get("matter_weighted_precision_fixed")
-        or data.get("particle_count_matter_fixed_precision")
-    )
-    matter_f1 = (
-        pm.get("avg_matter_weighted_f1_fixed")
-        or data.get("matter_weighted_f1_fixed")
-        or data.get("particle_count_matter_fixed_f1")
+    matter_precision_fixed = pm.get("avg_matter_weighted_precision_fixed") or data.get(
+        "particle_count_matter_fixed_precision"
     )
 
     fps = data.get("fps") or pm.get("fps_mean")
@@ -201,10 +194,9 @@ def _extract_dino_metrics(data: dict) -> dict[str, Any]:
     n_bg = data.get("n_background_blobs") or data.get("n_background_particles", 0)
 
     return {
-        "matter_weighted_jaccard": _to_float(matter_jaccard),
-        "matter_weighted_recall": _to_float(matter_recall),
-        "matter_weighted_precision": _to_float(matter_precision),
-        "matter_weighted_f1": _to_float(matter_f1),
+        "matter_weighted_jaccard_fixed": _to_float(matter_jaccard_fixed),
+        "matter_weighted_recall_fixed": _to_float(matter_recall_fixed),
+        "matter_weighted_precision_fixed": _to_float(matter_precision_fixed),
         "fps": _to_float(fps),
         "fn_rate": _to_float(fn_rate),
         "fp_rate": _to_float(fp_rate),
@@ -307,11 +299,11 @@ def build_comparison(
         if not np.isnan(dino_fn_rate) and not np.isnan(dino_fp_rate):
             dino_fn_frac = dino_fn_rate / 100.0
             dino_fp_frac = dino_fp_rate / 100.0
-            dino_p_recall, dino_p_precision, dino_p_f1 = compute_particle_f1(
+            dino_p_recall, dino_p_precision, _ = compute_particle_f1(
                 dino_fn_frac, dino_fp_frac, dino_n_obj, dino_n_bg
             )
         else:
-            dino_p_recall = dino_p_precision = dino_p_f1 = float("nan")
+            dino_p_recall = dino_p_precision = float("nan")
 
         row: dict[str, Any] = {
             "video": video,
@@ -321,15 +313,17 @@ def build_comparison(
             "cotracker_f1": ct_f1,
             "cotracker_fn_rate": ct.get("mean_fn_rate", float("nan")),
             "cotracker_fp_rate": ct.get("mean_fp_rate", float("nan")),
-            "dino_matter_jaccard": dino.get("matter_weighted_jaccard", float("nan")),
-            "dino_matter_precision": dino.get(
-                "matter_weighted_precision", float("nan")
+            "dino_matter_jaccard_fixed": dino.get(
+                "matter_weighted_jaccard_fixed", float("nan")
             ),
-            "dino_matter_recall": dino.get("matter_weighted_recall", float("nan")),
-            "dino_matter_f1": dino.get("matter_weighted_f1", float("nan")),
+            "dino_matter_recall_fixed": dino.get(
+                "matter_weighted_recall_fixed", float("nan")
+            ),
+            "dino_matter_precision_fixed": dino.get(
+                "matter_weighted_precision_fixed", float("nan")
+            ),
             "dino_particle_recall": dino_p_recall,
             "dino_particle_precision": dino_p_precision,
-            "dino_particle_f1": dino_p_f1,
             "dino_fps": dino.get("fps", float("nan")),
             "dino_fn_rate": dino.get("fn_rate", float("nan")),
             "dino_fp_rate": dino.get("fp_rate", float("nan")),
@@ -348,29 +342,16 @@ def build_subsampling_tradeoff(
     for pct in sorted(subsampling.keys(), reverse=True):
         per_video = subsampling[pct]
         jaccards = [
-            m["matter_weighted_jaccard"]
+            m["matter_weighted_jaccard_fixed"]
             for m in per_video.values()
-            if not np.isnan(m.get("matter_weighted_jaccard", float("nan")))
+            if not np.isnan(
+                m.get("matter_weighted_jaccard_fixed", float("nan"))
+            )
         ]
         fps_vals = [
             m["fps"]
             for m in per_video.values()
             if not np.isnan(m.get("fps", float("nan")))
-        ]
-        recalls = [
-            m["matter_weighted_recall"]
-            for m in per_video.values()
-            if not np.isnan(m.get("matter_weighted_recall", float("nan")))
-        ]
-        precisions = [
-            m["matter_weighted_precision"]
-            for m in per_video.values()
-            if not np.isnan(m.get("matter_weighted_precision", float("nan")))
-        ]
-        f1s = [
-            m["matter_weighted_f1"]
-            for m in per_video.values()
-            if not np.isnan(m.get("matter_weighted_f1", float("nan")))
         ]
 
         rows.append(
@@ -381,19 +362,10 @@ def build_subsampling_tradeoff(
                 "jaccard_std": _safe_std(jaccards),
                 "fps_mean": _safe_mean(fps_vals),
                 "fps_std": _safe_std(fps_vals),
-                "recall_mean": _safe_mean(recalls),
-                "recall_std": _safe_std(recalls),
-                "precision_mean": _safe_mean(precisions),
-                "precision_std": _safe_std(precisions),
-                "f1_mean": _safe_mean(f1s),
-                "f1_std": _safe_std(f1s),
                 "per_video": {
                     video: {
-                        "jaccard": m["matter_weighted_jaccard"],
+                        "matter_jaccard_fixed": m["matter_weighted_jaccard_fixed"],
                         "fps": m["fps"],
-                        "recall": m["matter_weighted_recall"],
-                        "precision": m["matter_weighted_precision"],
-                        "f1": m["matter_weighted_f1"],
                     }
                     for video, m in per_video.items()
                 },
@@ -462,9 +434,9 @@ def print_summary(
         if not np.isnan(r.get("cotracker_jaccard", float("nan")))
     ]
     dino_jaccards = [
-        r["dino_matter_jaccard"]
+        r["dino_matter_jaccard_fixed"]
         for r in comparison
-        if not np.isnan(r.get("dino_matter_jaccard", float("nan")))
+        if not np.isnan(r.get("dino_matter_jaccard_fixed", float("nan")))
     ]
     dino_fps_vals = [
         r["dino_fps"]
@@ -490,7 +462,7 @@ def print_summary(
     print("-" * 62)
     for r in comparison:
         ct_j = r.get("cotracker_jaccard", float("nan"))
-        d_j = r.get("dino_matter_jaccard", float("nan"))
+        d_j = r.get("dino_matter_jaccard_fixed", float("nan"))
         d_fps = r.get("dino_fps", float("nan"))
         ct_str = f"{ct_j:.4f}" if not np.isnan(ct_j) else "N/A"
         dj_str = f"{d_j:.4f}" if not np.isnan(d_j) else "N/A"
@@ -600,18 +572,22 @@ def main() -> None:
                 ),
             },
             "dino_tracking": {
-                "jaccard_mean": _safe_mean(
+                "matter_jaccard_fixed_mean": _safe_mean(
                     [
-                        r["dino_matter_jaccard"]
+                        r["dino_matter_jaccard_fixed"]
                         for r in comparison
-                        if not np.isnan(r.get("dino_matter_jaccard", float("nan")))
+                        if not np.isnan(
+                            r.get("dino_matter_jaccard_fixed", float("nan"))
+                        )
                     ]
                 ),
-                "jaccard_std": _safe_std(
+                "matter_jaccard_fixed_std": _safe_std(
                     [
-                        r["dino_matter_jaccard"]
+                        r["dino_matter_jaccard_fixed"]
                         for r in comparison
-                        if not np.isnan(r.get("dino_matter_jaccard", float("nan")))
+                        if not np.isnan(
+                            r.get("dino_matter_jaccard_fixed", float("nan"))
+                        )
                     ]
                 ),
             },

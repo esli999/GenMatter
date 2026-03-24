@@ -663,41 +663,12 @@ def init_gibbs_sweep_dino(key, genmatter_state, num_sweeps=30):
 # Evaluation Functions
 # ============================================================================
 #
-# IMPORTANT: Four different metrics are computed:
-#
-# 1. PARTICLE-BASED METRICS (compute_error_rates) - PRIMARY METRIC
-#    - Tracks discrete particle/blob location changes over time
-#    - Projects particle means to 2D and checks if they fall within GT mask
-#    - Identifies object vs background particles in frame 0
-#    - FN Rate: % of object particles that left the GT mask
-#    - FP Rate: % of background particles that entered the GT mask
-#    - Jaccard: Intersection over Union of particle sets
-#    - Accuracy: (TN + TP) / (TP + TN + FP + FN)
-#    - These are the metrics saved to JSON and reported in summaries
-#
-# 2. PARTICLE-COUNT UNWEIGHTED METRICS (evaluate_single_davis_video)
-#    - Counts particles with equal weight (1.0 per particle)
-#    - Particle membership determined by FRACTIONAL proportion of pixels in GT mask
-#    - Each particle contributes fractionally: if 70% of pixels in GT, contributes 0.7 to object count
-#    - Standard recall/precision/F1/Jaccard computed on fractional particle counts
-#    - Used for comparison with traditional segmentation methods
-#
-# 3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (evaluate_single_davis_video)
-#    - Counts particles weighted by (pixel_count × blob_weight) per frame
-#    - Particle membership determined by FRACTIONAL proportion of pixels in GT mask
-#    - Each particle contributes: (proportion_in_GT × pixel_count × blob_weight) to object count
-#    - Recall/Precision/F1/Jaccard calculated on weighted fractional particle counts with adaptive weights
-#    - Shows benefit of probabilistic representation
-#
-# 4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (evaluate_single_davis_video)
-#    - Counts particles weighted by (pixel_count × blob_weight) from frame 0
-#    - Particle membership determined by FRACTIONAL proportion of pixels in GT mask
-#    - Each particle contributes: (proportion_in_GT × pixel_count × blob_weight) to object count
-#    - Recall/Precision/F1/Jaccard calculated on weighted fractional particle counts with fixed weights
-#    - Fair comparison with point trackers that don't adapt weights
-#
-# The particle-based metrics are what we care about for tracking evaluation.
+# Metrics (DAVIS):
+# - Discretized particle FP/FN rates (compute_error_rates) for diagnostics / plots.
+# - Primary comparison metric: matter-weighted recall, precision, and Jaccard with
+#   frame-0 blob weights (evaluate_single_davis_video).
 # ============================================================================
+
 
 def compute_error_rates(tracking_data, segmentation_masks, img_dims,
                        blob_counting_threshold=0, focal_length=520.0, force_below_count_thresh_as_outlier=False,
@@ -1449,54 +1420,22 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         if MEASURE_FPS and fps is not None:
             print(f"  FPS: {fps:.2f} frames/second")
         
-        print(f"\n  1. PARTICLE-BASED METRICS (projected particle means):")
+        print(f"\n  1. PARTICLE-BASED DIAGNOSTICS (projected particle means; FN/FP rates):")
         print(f"    Mean FN Rate: {error_results['mean_fn_rate']:.2f}%  (object particles leaving mask)")
         print(f"    Mean FP Rate: {error_results['mean_fp_rate']:.2f}%  (background particles entering mask)")
-        print(f"    Mean Jaccard: {error_results['mean_jaccard']:.3f}  (particle IoU)")
         print(f"    Mean Accuracy: {error_results['mean_accuracy']:.2f}%  ((TN + TP) / (TP + TN + FP + FN))")
-        print(f"    Note: Projects particle means to 2D, checks if they fall within GT mask")
 
-        # Compute F1 from recall and precision (not returned by evaluate_single_davis_video)
-        recall = experiment_metrics['avg_recall']
-        precision = experiment_metrics['avg_precision']
-        avg_f1 = 2 * (recall * precision) / (recall + precision) if (recall + precision) > 0 else 0.0
-
-        print(f"\n  2. PARTICLE-COUNT UNWEIGHTED METRICS (fractional particle contributions):")
-        print(f"    Recall:     {recall:.3f}  (fractional object particles correctly predicted)")
-        print(f"    Precision:  {precision:.3f}  (predicted fractional particles that are correct)")
-        print(f"    F1:         {avg_f1:.3f}  (harmonic mean)")
-        print(f"    Jaccard:    {experiment_metrics['avg_jaccard']:.3f}  (fractional particle IoU)")
-        print(f"    Accuracy:   {experiment_metrics['avg_accuracy']:.3f}  (fractional particle accuracy)")
-        print(f"    Note: Each particle contributes fractionally based on proportion of pixels in GT mask")
-
-        print(f"\n  3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (weighted fractional contributions):")
-        print(f"    Recall:     {experiment_metrics['avg_matter_weighted_recall']:.3f}  (weighted object matter staying in mask)")
-        print(f"    Precision:  {experiment_metrics['avg_matter_weighted_precision']:.3f}  (predicted weighted matter correctness)")
-        print(f"    F1:         {experiment_metrics['avg_matter_weighted_f1']:.3f}  (harmonic mean)")
-        print(f"    Jaccard:    {experiment_metrics['avg_matter_weighted_jaccard']:.3f}  (weighted matter IoU)")
-        print(f"    Accuracy:   {experiment_metrics['avg_matter_weighted_accuracy']:.3f}  (weighted matter accuracy)")
-        print(f"    Note: Weights fractional contributions by (pixel_count × blob_weight), adaptive per frame")
-
-        print(f"\n  4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (weighted fractional contributions):")
-        print(f"    Recall:     {experiment_metrics['avg_matter_weighted_recall_fixed']:.3f}  (weighted object matter staying in mask)")
-        print(f"    Precision:  {experiment_metrics['avg_matter_weighted_precision_fixed']:.3f}  (predicted weighted matter correctness)")
-        print(f"    F1:         {experiment_metrics['avg_matter_weighted_f1_fixed']:.3f}  (harmonic mean)")
-        print(f"    Jaccard:    {experiment_metrics['avg_matter_weighted_jaccard_fixed']:.3f}  (weighted matter IoU)")
-        print(f"    Accuracy:   {experiment_metrics['avg_matter_weighted_accuracy_fixed']:.3f}  (weighted matter accuracy)")
-        print(f"    Note: Weights fractional contributions by (pixel_count × blob_weight), fixed from frame 0")
+        print(f"\n  2. MATTER-WEIGHTED (frame-0 blob weights) — primary DAVIS metric:")
+        pm = experiment_metrics
+        print(f"    Recall:     {pm['avg_matter_weighted_recall_fixed']:.3f}")
+        print(f"    Precision:  {pm['avg_matter_weighted_precision_fixed']:.3f}")
+        print(f"    Jaccard:    {pm['avg_matter_weighted_jaccard_fixed']:.3f}")
+        print(f"    Accuracy:   {pm['avg_matter_weighted_accuracy_fixed']:.3f}")
 
         # Diagnostic checks for adversarial cases
         print(f"\n  Diagnostic Checks (detecting potential metric gaming):")
 
-        # 1. Adaptive-Fixed Gap
-        adaptive_fixed_gap = experiment_metrics['avg_matter_weighted_f1_fixed'] - experiment_metrics['avg_matter_weighted_f1']
-        print(f"    Adaptive-Fixed Gap:  {adaptive_fixed_gap:+.3f}  (if > 0.1, model may downweight difficult particles)")
-        if adaptive_fixed_gap > 0.1:
-            print(f"    ⚠️  WARNING: Large gap suggests adaptive weights are gaming the metric")
-        elif adaptive_fixed_gap < -0.05:
-            print(f"    ⚠️  WARNING: Negative gap suggests fixed weights may be suboptimal")
-
-        # 2. Weight Entropy (frame 0)
+        # 1. Weight Entropy (frame 0)
         frame0_blob_weights = np.array(tracking_data[0]['blob_weights'])
         weight_entropy = -np.sum(frame0_blob_weights * np.log(frame0_blob_weights + 1e-10))
         max_entropy = np.log(len(frame0_blob_weights))
@@ -1668,60 +1607,33 @@ if __name__ == "__main__":
                 else:
                     avg_spatial_std = None
 
-                adaptive_fixed_gap = float(
-                    result['pixel_metrics']['avg_matter_weighted_f1_fixed'] -
-                    result['pixel_metrics']['avg_matter_weighted_f1']
-                )
+                pm = result['pixel_metrics']
 
-                # Store accuracy with all four metric types
                 all_accuracies[video_name] = {
-                    # Full pixel metrics dict (contains all trial data)
-                    'pixel_metrics': result['pixel_metrics'],
+                    'pixel_metrics': pm,
 
-                    # 1. Particle-based error rates (projected particle means)
                     'particle_fn_rate': result['error_results']['mean_fn_rate'],
                     'particle_fp_rate': result['error_results']['mean_fp_rate'],
-                    'particle_jaccard': result['error_results']['mean_jaccard'],
                     'particle_accuracy': result['error_results']['mean_accuracy'],
                     'n_object_particles': result['error_results']['n_object_blobs'],
                     'n_background_particles': result['error_results']['n_background_blobs'],
 
-                    # 2. Particle-count unweighted metrics (fractional particle contributions)
-                    'particle_count_unweighted_recall': result['pixel_metrics']['avg_recall'],
-                    'particle_count_unweighted_precision': result['pixel_metrics']['avg_precision'],
-                    'particle_count_unweighted_f1': 2 * (result['pixel_metrics']['avg_recall'] * result['pixel_metrics']['avg_precision']) / (result['pixel_metrics']['avg_recall'] + result['pixel_metrics']['avg_precision']) if (result['pixel_metrics']['avg_recall'] + result['pixel_metrics']['avg_precision']) > 0 else 0.0,
-                    'particle_count_unweighted_jaccard': result['pixel_metrics']['avg_jaccard'],
-                    'particle_count_unweighted_accuracy': result['pixel_metrics']['avg_accuracy'],
+                    'particle_count_matter_fixed_recall': pm['avg_matter_weighted_recall_fixed'],
+                    'particle_count_matter_fixed_precision': pm['avg_matter_weighted_precision_fixed'],
+                    'particle_count_matter_fixed_jaccard': pm['avg_matter_weighted_jaccard_fixed'],
+                    'particle_count_matter_fixed_accuracy': pm['avg_matter_weighted_accuracy_fixed'],
 
-                    # 3. Particle-count matter-weighted adaptive metrics (weighted fractional contributions)
-                    'particle_count_matter_adaptive_recall': result['pixel_metrics']['avg_matter_weighted_recall'],
-                    'particle_count_matter_adaptive_precision': result['pixel_metrics']['avg_matter_weighted_precision'],
-                    'particle_count_matter_adaptive_f1': result['pixel_metrics']['avg_matter_weighted_f1'],
-                    'particle_count_matter_adaptive_jaccard': result['pixel_metrics']['avg_matter_weighted_jaccard'],
-                    'particle_count_matter_adaptive_accuracy': result['pixel_metrics']['avg_matter_weighted_accuracy'],
-
-                    # 4. Particle-count matter-weighted fixed metrics (weighted fractional contributions)
-                    'particle_count_matter_fixed_recall': result['pixel_metrics']['avg_matter_weighted_recall_fixed'],
-                    'particle_count_matter_fixed_precision': result['pixel_metrics']['avg_matter_weighted_precision_fixed'],
-                    'particle_count_matter_fixed_f1': result['pixel_metrics']['avg_matter_weighted_f1_fixed'],
-                    'particle_count_matter_fixed_jaccard': result['pixel_metrics']['avg_matter_weighted_jaccard_fixed'],
-                    'particle_count_matter_fixed_accuracy': result['pixel_metrics']['avg_matter_weighted_accuracy_fixed'],
-
-                    # FPS measurement
                     'fps': result.get('fps'),
 
-                    # Diagnostic metrics (detecting potential gaming)
                     'diagnostics': {
-                        'adaptive_fixed_gap': adaptive_fixed_gap,
                         'weight_entropy_normalized': normalized_entropy,
                         'spatial_std_dev': avg_spatial_std,
                         'n_reference_particles': int(len(reference_particle_indices)),
-                        'warning_adaptive_fixed_gap': adaptive_fixed_gap > 0.1,
                         'warning_weight_concentration': normalized_entropy < 0.5,
                         'warning_spatial_clustering': avg_spatial_std is not None and avg_spatial_std < 0.1,
                         'warning_few_particles': len(reference_particle_indices) < 10
                     }
-                    }
+                }
 
                 # Save per-run JSON
                 json_results_dir = os.path.join(base_dir, "json_results")
@@ -1784,20 +1696,16 @@ if __name__ == "__main__":
         all_accuracies_from_json = all_accuracies
 
     # Filter out incomplete results (videos that failed to process)
-    valid_results = {k: v for k, v in all_accuracies_from_json.items() 
-                    if 'particle_fn_rate' in v and 'particle_count_unweighted_recall' in v}
+    valid_results = {k: v for k, v in all_accuracies_from_json.items()
+                    if 'particle_fn_rate' in v and 'particle_count_matter_fixed_jaccard' in v}
 
     print(f"\n{'='*80}")
     print(f"SUMMARY - {len(valid_results)} Videos")
     print(f"{'='*80}")
-    print(f"\nMetric Interpretation Guide:")
-    print(f"  • Particle-based: Projects particle means to 2D, checks if they fall within GT mask")
-    print(f"  • Particle-count unweighted: Fractional particle contributions, equal weight per particle")
-    print(f"  • Particle-count matter adaptive: Fractional contributions weighted by (pixel_count × blob_weight), adaptive per frame")
-    print(f"  • Particle-count matter fixed: Fractional contributions weighted by (pixel_count × blob_weight), fixed from frame 0")
+    print(f"\nMetric guide: matter-weighted recall / precision / Jaccard use frame-0 blob weights (primary DAVIS metric).")
     print(f"\n")
 
-    # Compute aggregate statistics for all four metric types
+    # Aggregate statistics
     
     # if len(valid_results) == 0:
     #     print("⚠️  No valid results found in JSON file. Cannot compute aggregate statistics.")
@@ -1805,24 +1713,9 @@ if __name__ == "__main__":
     
     particle_fn_rates = [m['particle_fn_rate'] for m in valid_results.values()]
     particle_fp_rates = [m['particle_fp_rate'] for m in valid_results.values()]
-    particle_jaccard = [m['particle_jaccard'] for m in valid_results.values()]
-    particle_accuracy = [m['particle_accuracy'] for m in valid_results.values()]
-    
-    particle_count_unweighted_recall = [m['particle_count_unweighted_recall'] for m in valid_results.values()]
-    particle_count_unweighted_precision = [m['particle_count_unweighted_precision'] for m in valid_results.values()]
-    particle_count_unweighted_f1 = [m['particle_count_unweighted_f1'] for m in valid_results.values()]
-    particle_count_unweighted_jaccard = [m['particle_count_unweighted_jaccard'] for m in valid_results.values()]
-    particle_count_unweighted_accuracy = [m['particle_count_unweighted_accuracy'] for m in valid_results.values()]
-    
-    particle_count_matter_adaptive_recall = [m['particle_count_matter_adaptive_recall'] for m in valid_results.values()]
-    particle_count_matter_adaptive_precision = [m['particle_count_matter_adaptive_precision'] for m in valid_results.values()]
-    particle_count_matter_adaptive_f1 = [m['particle_count_matter_adaptive_f1'] for m in valid_results.values()]
-    particle_count_matter_adaptive_jaccard = [m['particle_count_matter_adaptive_jaccard'] for m in valid_results.values()]
-    particle_count_matter_adaptive_accuracy = [m['particle_count_matter_adaptive_accuracy'] for m in valid_results.values()]
-    
+
     particle_count_matter_fixed_recall = [m['particle_count_matter_fixed_recall'] for m in valid_results.values()]
     particle_count_matter_fixed_precision = [m['particle_count_matter_fixed_precision'] for m in valid_results.values()]
-    particle_count_matter_fixed_f1 = [m['particle_count_matter_fixed_f1'] for m in valid_results.values()]
     particle_count_matter_fixed_jaccard = [m['particle_count_matter_fixed_jaccard'] for m in valid_results.values()]
     particle_count_matter_fixed_accuracy = [m['particle_count_matter_fixed_accuracy'] for m in valid_results.values()]
 
@@ -1830,29 +1723,16 @@ if __name__ == "__main__":
     fps_values = [m.get('fps') for m in valid_results.values() if m.get('fps') is not None]
 
     print(f"AGGREGATE STATISTICS ACROSS ALL VIDEOS:")
-    
-    print(f"\n  1. PARTICLE-BASED METRICS (projected particle means):")
+
+    print(f"\n  1. PARTICLE-MEAN FN/FP (diagnostic):")
     print(f"    Mean FN Rate:            {np.mean(particle_fn_rates):.2f}% ± {np.std(particle_fn_rates):.2f}%")
     print(f"    Mean FP Rate:            {np.mean(particle_fp_rates):.2f}% ± {np.std(particle_fp_rates):.2f}%")
-    print(f"    Mean Jaccard:            {np.mean(particle_jaccard):.3f} ± {np.std(particle_jaccard):.3f}")
 
-    print(f"\n  2. PARTICLE-COUNT UNWEIGHTED METRICS (fractional particle contributions):")
-    print(f"    Recall:                  {np.mean(particle_count_unweighted_recall):.3f} ± {np.std(particle_count_unweighted_recall):.3f}")
-    print(f"    Precision:               {np.mean(particle_count_unweighted_precision):.3f} ± {np.std(particle_count_unweighted_precision):.3f}")
-    print(f"    F1:                      {np.mean(particle_count_unweighted_f1):.3f} ± {np.std(particle_count_unweighted_f1):.3f}")
-    print(f"    Jaccard:                 {np.mean(particle_count_unweighted_jaccard):.3f} ± {np.std(particle_count_unweighted_jaccard):.3f}")
-
-    print(f"\n  3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (weighted fractional contributions):")
-    print(f"    Recall:                  {np.mean(particle_count_matter_adaptive_recall):.3f} ± {np.std(particle_count_matter_adaptive_recall):.3f}")
-    print(f"    Precision:               {np.mean(particle_count_matter_adaptive_precision):.3f} ± {np.std(particle_count_matter_adaptive_precision):.3f}")
-    print(f"    F1:                      {np.mean(particle_count_matter_adaptive_f1):.3f} ± {np.std(particle_count_matter_adaptive_f1):.3f}")
-    print(f"    Jaccard:                 {np.mean(particle_count_matter_adaptive_jaccard):.3f} ± {np.std(particle_count_matter_adaptive_jaccard):.3f}")
-
-    print(f"\n  4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (weighted fractional contributions):")
+    print(f"\n  2. MATTER-WEIGHTED FIXED (primary DAVIS metric):")
     print(f"    Recall:                  {np.mean(particle_count_matter_fixed_recall):.3f} ± {np.std(particle_count_matter_fixed_recall):.3f}")
     print(f"    Precision:               {np.mean(particle_count_matter_fixed_precision):.3f} ± {np.std(particle_count_matter_fixed_precision):.3f}")
-    print(f"    F1:                      {np.mean(particle_count_matter_fixed_f1):.3f} ± {np.std(particle_count_matter_fixed_f1):.3f}")
     print(f"    Jaccard:                 {np.mean(particle_count_matter_fixed_jaccard):.3f} ± {np.std(particle_count_matter_fixed_jaccard):.3f}")
+    print(f"    Accuracy:                {np.mean(particle_count_matter_fixed_accuracy):.3f} ± {np.std(particle_count_matter_fixed_accuracy):.3f}")
 
     # Print FPS statistics if available
     if fps_values:
@@ -1869,28 +1749,15 @@ if __name__ == "__main__":
     for video_name, metrics in valid_results.items():
         print(f"  {video_name}:")
         
-        print(f"    1. PARTICLE-BASED METRICS (projected particle means):")
-        print(f"      FN Rate:                 {metrics['particle_fn_rate']:.2f}%  (object particles leaving mask)")
-        print(f"      FP Rate:                 {metrics['particle_fp_rate']:.2f}%  (background particles entering mask)")
-        print(f"      Jaccard:                 {metrics['particle_jaccard']:.3f}  (particle IoU)")
+        print(f"    1. Particle-mean FN/FP (diagnostic):")
+        print(f"      FN Rate:                 {metrics['particle_fn_rate']:.2f}%")
+        print(f"      FP Rate:                 {metrics['particle_fp_rate']:.2f}%")
 
-        print(f"\n    2. PARTICLE-COUNT UNWEIGHTED METRICS (fractional particle contributions):")
-        print(f"      Recall:                  {metrics['particle_count_unweighted_recall']:.3f}  (fractional object particles correctly predicted)")
-        print(f"      Precision:               {metrics['particle_count_unweighted_precision']:.3f}  (predicted fractional particles that are correct)")
-        print(f"      F1:                      {metrics['particle_count_unweighted_f1']:.3f}  (harmonic mean)")
-        print(f"      Jaccard:                 {metrics['particle_count_unweighted_jaccard']:.3f}  (fractional particle IoU)")
-
-        print(f"\n    3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (weighted fractional contributions):")
-        print(f"      Recall:                  {metrics['particle_count_matter_adaptive_recall']:.3f}  (weighted object matter staying in mask)")
-        print(f"      Precision:               {metrics['particle_count_matter_adaptive_precision']:.3f}  (predicted weighted matter correctness)")
-        print(f"      F1:                      {metrics['particle_count_matter_adaptive_f1']:.3f}  (harmonic mean)")
-        print(f"      Jaccard:                 {metrics['particle_count_matter_adaptive_jaccard']:.3f}  (weighted matter IoU)")
-
-        print(f"\n    4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (weighted fractional contributions):")
-        print(f"      Recall:                  {metrics['particle_count_matter_fixed_recall']:.3f}  (weighted object matter staying in mask)")
-        print(f"      Precision:               {metrics['particle_count_matter_fixed_precision']:.3f}  (predicted weighted matter correctness)")
-        print(f"      F1:                      {metrics['particle_count_matter_fixed_f1']:.3f}  (harmonic mean)")
-        print(f"      Jaccard:                 {metrics['particle_count_matter_fixed_jaccard']:.3f}  (weighted matter IoU)")
+        print(f"\n    2. Matter-weighted fixed (primary):")
+        print(f"      Recall:                  {metrics['particle_count_matter_fixed_recall']:.3f}")
+        print(f"      Precision:               {metrics['particle_count_matter_fixed_precision']:.3f}")
+        print(f"      Jaccard:                 {metrics['particle_count_matter_fixed_jaccard']:.3f}")
+        print(f"      Accuracy:                {metrics['particle_count_matter_fixed_accuracy']:.3f}")
 
         # Print FPS for this video if available
         video_fps = metrics.get('fps')
