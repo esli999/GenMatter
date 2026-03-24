@@ -18,9 +18,43 @@ COMMANDS = {
     "davis-extract-3d-motion": "preprocessing/motion_extraction_3d/run_davis_3d_motion.py",
     "download-tapvid-davis": "scripts/download_tapvid_davis.py",
     "davis-preprocess": "scripts/davis_preprocess.py",
-    "davis-tracking": "experiments/davis/run_davis_tracking.py",
-    "davis-subsampling": "experiments/davis/run_davis_subsampling.py",
-    "davis-ablation": "experiments/davis/run_davis_ablation.py",
+    # DAVIS: 3 experiment types × SAM on/off (six runners). Legacy names = SAM (same as ``*-sam``).
+    "davis-tracking-sam": (
+        "experiments/davis/run_davis_tracking.py",
+        ["--use-sam"],
+    ),
+    "davis-tracking-no-sam": (
+        "experiments/davis/run_davis_tracking.py",
+        ["--no-use-sam"],
+    ),
+    "davis-tracking": (
+        "experiments/davis/run_davis_tracking.py",
+        ["--use-sam"],
+    ),
+    "davis-subsampling-sam": (
+        "experiments/davis/run_davis_subsampling.py",
+        ["--use-sam"],
+    ),
+    "davis-subsampling-no-sam": (
+        "experiments/davis/run_davis_subsampling.py",
+        ["--no-use-sam"],
+    ),
+    "davis-subsampling": (
+        "experiments/davis/run_davis_subsampling.py",
+        ["--use-sam"],
+    ),
+    "davis-ablation-sam": (
+        "experiments/davis/run_davis_ablation.py",
+        ["--use-sam"],
+    ),
+    "davis-ablation-no-sam": (
+        "experiments/davis/run_davis_ablation.py",
+        ["--no-use-sam"],
+    ),
+    "davis-ablation": (
+        "experiments/davis/run_davis_ablation.py",
+        ["--use-sam"],
+    ),
     "cotracker": "experiments/baselines/run_cotracker.py",
     "psychophysics-benchmark": (
         "experiments/psychophysics/run_psychophysics_benchmark.py",

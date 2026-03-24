@@ -1,7 +1,7 @@
-"""DAVIS tracking postprocessing: compare GenMatter, CoTracker, and subsampling ablations.
+"""DAVIS tracking postprocessing: compare GenMatter, CoTracker, and subsampling curves.
 
-Loads per-video JSON results from DAVIS tracking, subsampling, ablation, and
-CoTracker experiments.  Extracts matter-weighted Jaccard, precision, recall,
+Loads per-video JSON results from DAVIS tracking (SAM init by default), SAM and
+no-SAM subsampling runs, and CoTracker.  Extracts matter-weighted Jaccard, precision, recall,
 F1, FPS, FPR, FNR per video, aggregates across videos, and writes:
 
 - results/postprocessing/davis_comparison.json   (all methods side-by-side)
@@ -532,9 +532,12 @@ def main() -> None:
     print("=" * 80)
     print("Loading experiment outputs from:")
     print(f"  CoTracker baseline:     {config.COTRACKER_OUTPUT_DIR}")
-    print(f"  DINO tracking (main): {config.DAVIS_TRACKING_OUTPUT_DIR}")
-    print(f"  DINO subsampling (SAM): {config.DAVIS_SUBSAMPLING_OUTPUT_DIR}")
-    print(f"  DINO ablation (no SAM): {config.DAVIS_ABLATION_OUTPUT_DIR}")
+    print(f"  DINO tracking (SAM): {config.DAVIS_TRACKING_OUTPUT_DIR_SAM}")
+    print(f"  DINO tracking (no SAM): {config.DAVIS_TRACKING_OUTPUT_DIR_NO_SAM}")
+    print(f"  DINO subsampling (SAM): {config.DAVIS_SUBSAMPLING_OUTPUT_DIR_SAM}")
+    print(f"  DINO subsampling (no SAM): {config.DAVIS_SUBSAMPLING_OUTPUT_DIR_NO_SAM}")
+    print(f"  DINO ablation (SAM): {config.DAVIS_ABLATION_OUTPUT_DIR_SAM}")
+    print(f"  DINO ablation (no SAM): {config.DAVIS_ABLATION_OUTPUT_DIR_NO_SAM}")
     print(f"Writing: {out_dir}  (davis_comparison.json, davis_subsampling_tradeoff.json, davis_results.csv)")
     print("=" * 80)
     print()
@@ -545,14 +548,14 @@ def main() -> None:
     print("  CoTracker baseline:")
     ct_results = load_cotracker_results(config.COTRACKER_OUTPUT_DIR)
 
-    print("  DINO tracking (main):")
-    dino_results = load_dino_tracking_results(config.DAVIS_TRACKING_OUTPUT_DIR)
+    print("  DINO tracking (SAM — feeds main comparison):")
+    dino_results = load_dino_tracking_results(config.DAVIS_TRACKING_OUTPUT_DIR_SAM)
 
     print("  DINO subsampling (SAM):")
-    sub_sam = load_subsampling_results(config.DAVIS_SUBSAMPLING_OUTPUT_DIR)
+    sub_sam = load_subsampling_results(config.DAVIS_SUBSAMPLING_OUTPUT_DIR_SAM)
 
-    print("  DINO subsampling (no SAM / ablation):")
-    sub_no_sam = load_subsampling_results(config.DAVIS_ABLATION_OUTPUT_DIR)
+    print("  DINO subsampling (no SAM):")
+    sub_no_sam = load_subsampling_results(config.DAVIS_SUBSAMPLING_OUTPUT_DIR_NO_SAM)
 
     # ---- Build comparison -------------------------------------------------
     print("\nBuilding comparison...")

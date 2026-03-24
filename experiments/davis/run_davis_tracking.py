@@ -48,8 +48,7 @@ from genjax import Const, gen, Pytree
 
 VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
-NUM_INIT_PARTICLES_ON_MASK = 50
-USE_SAM_FRAME0 = False
+USE_SAM_FRAME0 = True
 
 # Paths
 DAVIS_3D_MOTION_PATH = str(config.DAVIS_3D_MOTION_PATH)
@@ -262,7 +261,7 @@ def initialize_model_with_dino(tracked_points, num_blobs, num_hyperblobs,
             tracked_points, num_blobs, num_hyperblobs,
             segmentation_mask=segmentation_mask,
             motion_vectors=motion_vectors,
-            num_roi_blobs = NUM_INIT_PARTICLES_ON_MASK
+            num_roi_blobs=None,
         )
         num_hyperblobs_actual = num_hyperblobs
 
@@ -1272,6 +1271,19 @@ def process_video(video_name):
 # ============================================================================
 
 if __name__ == "__main__":
+    import argparse
+    import sys
+
+    _davis_dir = _Path(__file__).resolve().parent
+    if str(_davis_dir) not in sys.path:
+        sys.path.insert(0, str(_davis_dir))
+    import davis_run_cli
+
+    _parser = argparse.ArgumentParser(description="DAVIS DINO full-grid tracking")
+    davis_run_cli.add_use_sam_args(_parser)
+    _args = _parser.parse_args()
+    davis_run_cli.configure_experiment_module(sys.modules[__name__], _args, "tracking")
+
     os.makedirs(EXPERIMENT_SAVE_DIR, exist_ok=True)
 
     all_results = []
@@ -1279,6 +1291,8 @@ if __name__ == "__main__":
 
     print(f"{'='*80}")
     print(f"DINO TRACKING EXPERIMENT - Processing {len(VIDEO_NAMES)} videos")
+    print(f"  SAM frame-0 init: {USE_SAM_FRAME0}")
+    print(f"  Output directory: {EXPERIMENT_SAVE_DIR}")
     print(f"{'='*80}\n")
 
     for video_name in tqdm(VIDEO_NAMES, desc="Overall Progress", position=0):

@@ -104,9 +104,14 @@ uv run python run_experiments.py gestalt
 uv run python run_experiments.py gestalt-depth-ablation
 
 # DAVIS + baselines
-uv run python run_experiments.py davis-tracking
-uv run python run_experiments.py davis-subsampling
-uv run python run_experiments.py davis-ablation
+# Three experiment types (full-grid tracking, hyperblob ablation, subsampling tradeoff), each with SAM on or off:
+uv run python run_experiments.py davis-tracking-sam
+uv run python run_experiments.py davis-tracking-no-sam
+uv run python run_experiments.py davis-ablation-sam
+uv run python run_experiments.py davis-ablation-no-sam
+uv run python run_experiments.py davis-subsampling-sam
+uv run python run_experiments.py davis-subsampling-no-sam
+# Short names davis-tracking, davis-ablation, and davis-subsampling are aliases for the *-sam commands.
 uv run python run_experiments.py cotracker
 
 # RDK

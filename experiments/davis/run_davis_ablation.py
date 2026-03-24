@@ -1577,13 +1577,28 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
 # ============================================================================
 
 if __name__ == "__main__":
+    import argparse
+    import sys
+
+    _davis_dir = _Path(__file__).resolve().parent
+    if str(_davis_dir) not in sys.path:
+        sys.path.insert(0, str(_davis_dir))
+    import davis_run_cli
+
+    _parser = argparse.ArgumentParser(description="DAVIS DINO hyperblob-prior ablation")
+    davis_run_cli.add_use_sam_args(_parser)
+    _args = _parser.parse_args()
+    davis_run_cli.configure_experiment_module(sys.modules[__name__], _args, "ablation")
+
     os.makedirs(EXPERIMENT_SAVE_DIR, exist_ok=True)
 
     all_results = []
     all_accuracies = {}
 
     print(f"{'='*80}")
-    print(f"DINO TRACKING EXPERIMENT - Processing {len(VIDEO_NAMES)} videos")
+    print(f"DINO ABLATION EXPERIMENT - Processing {len(VIDEO_NAMES)} videos")
+    print(f"  SAM frame-0 init: {USE_SAM_FRAME0}")
+    print(f"  Output directory: {EXPERIMENT_SAVE_DIR}")
     if MEASURE_FPS:
         print(f"FPS measurement: ENABLED")
     else:
