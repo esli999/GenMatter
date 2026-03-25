@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Video preprocessing (ported from GenParticles ``scripts/preprocess_video.py``).
+Video preprocessing for 3D motion NPZ output.
 
 Uses Video-Depth-Anything + RAFT to produce dense ``points_3d``, ``motion_vectors_3d``, ``colors``,
-``intrinsics`` in ``.npz`` format (same keys and layout as legacy GenParticles: ``float64`` arrays,
-``np.savez`` uncompressed). JAX is not imported here.
+``intrinsics`` in ``.npz`` format (``float64`` arrays, ``np.savez`` uncompressed). JAX is not imported here.
 
 VDA checkout: ``<repo>/external/video-depth-anything`` or ``GENMATTER_VIDEO_DEPTH_ANYTHING_PATH``.
 """
@@ -571,7 +570,7 @@ def process_video_to_3d_data(
         "height": h_subsampled,
     }
 
-    # Final step: save (legacy GenParticles: four keys, float64, np.savez uncompressed)
+    # Final step: save (four keys, float64, np.savez uncompressed)
     save_idx = total_steps
     step(save_idx, "Save — write NPZ (float64, uncompressed)")
     _vlog(verbose, "Step 5: Saving results...")

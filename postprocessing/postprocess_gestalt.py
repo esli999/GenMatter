@@ -12,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 from PIL import Image
 from scipy import stats
 from scipy.ndimage import zoom
@@ -361,24 +362,20 @@ def main() -> None:
     output_dir = Path(config.POSTPROCESSING_OUTPUT_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=" * 80)
-    print("Gestalt postprocessing")
-    print("=" * 80)
-    print(f"Output directory: {output_dir}")
-    print()
-    print("[1] Main comparison (GenMatter vs SegAnyMo vs FlowSAM)")
-    print(f"    GenMatter runs: {config.GESTALT_OUTPUT_DIR}")
-    print(f"    GT / FlowSAM:   {config.GESTALT_BASE_PATH}")
-    if config.SEGANYMO_BASE_PATH is not None:
-        print(f"    SegAnyMo:       {config.SEGANYMO_BASE_PATH}")
-    else:
-        print("    SegAnyMo:       (SEGANYMO_BASE_PATH not set)")
-    print()
-    print("[2] Depth ablation (full-depth vs depth-ablation GenMatter)")
-    print(f"    Baseline runs:  {config.GESTALT_OUTPUT_DIR}")
-    print(f"    Ablation runs:  {config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR}")
-    print("=" * 80)
-    print()
+    t0 = _term_styles()
+    print(
+        f"\n{t0['cyan']}{t0['bold']}Gestalt postprocessing{t0['reset']}  "
+        f"{t0['dim']}{output_dir}{t0['reset']}"
+    )
+    print(
+        f"{t0['dim']}[1] GenMatter vs SegAnyMo vs FlowSAM  ·  "
+        f"GM: {config.GESTALT_OUTPUT_DIR}  ·  "
+        f"SegAnyMo: {config.SEGANYMO_BASE_PATH or 'unset'}{t0['reset']}"
+    )
+    print(
+        f"{t0['dim']}[2] Depth ablation  ·  baseline: {config.GESTALT_OUTPUT_DIR}  ·  "
+        f"ablation: {config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR}{t0['reset']}\n"
+    )
 
     # Discover which scene/texture combos have data
     existing_combinations: list[tuple[str, str]] = []
@@ -421,12 +418,16 @@ def main() -> None:
 
     all_results: list[dict] = []
     if existing_combinations:
-        print(f"[1] Processing {len(existing_combinations)} scene–texture combinations\n")
+        combo_iter = tqdm(
+            existing_combinations,
+            desc="Gestalt main comparison",
+            unit="combo",
+            leave=True,
+            file=sys.stdout,
+        )
 
         # ---- per-combo evaluation ----
-        for scene, texture in existing_combinations:
-            print(f"  {scene} / {texture}")
-
+        for scene, texture in combo_iter:
             seg_frames: list[float | None] = []
             fs_frames: list[float | None] = []
             gm_frames: list[float | None] = []
@@ -575,12 +576,38 @@ def main() -> None:
         # ---- stdout summary table ----
         _print_summary(all_results, summary)
 
-        print(f"\nOutputs written to {output_dir}/")
-        print(f"  - gestalt_all_results.json  ({len(all_results)} combos)")
-        print("  - gestalt_summary.json")
-        print("  - gestalt_results.csv")
+        tw = _term_styles()
+        print(
+            f"{tw['dim']}Wrote gestalt_all_results.json ({len(all_results)} combos), "
+            f"gestalt_summary.json, gestalt_results.csv  →  {output_dir}/{tw['reset']}\n"
+        )
 
     run_gestalt_ablation_postprocess()
+
+
+# ---------------------------------------------------------------------------
+# Terminal styling (match DAVIS postprocessing)
+# ---------------------------------------------------------------------------
+
+
+def _term_styles() -> dict[str, str]:
+    if not sys.stdout.isatty():
+        return {k: "" for k in ("reset", "bold", "dim", "cyan", "green", "magenta", "yellow")}
+    return {
+        "reset": "\033[0m",
+        "bold": "\033[1m",
+        "dim": "\033[2m",
+        "cyan": "\033[96m",
+        "green": "\033[92m",
+        "magenta": "\033[95m",
+        "yellow": "\033[93m",
+    }
+
+
+def _fmt_pm(mean: float | None, std: float | None) -> str:
+    if mean is None or std is None:
+        return "N/A"
+    return f"{mean:.4f} ± {std:.4f}"
 
 
 # ---------------------------------------------------------------------------
@@ -589,92 +616,134 @@ def main() -> None:
 
 
 def _print_summary(all_results: list[dict], summary: dict) -> None:
-    print("\n" + "=" * 80)
-    print("SUMMARY STATISTICS - ACCURACY")
-    print("=" * 80)
-    for name in ("seganymo", "flowsam", "genmatter"):
-        s = summary[name]
-        acc = s["accuracy"]
-        if acc["mean"] is not None:
-            print(
-                f"\n  {name:12s}  (N={s['n']:>3d})  "
-                f"Mean: {acc['mean']:.4f} +/- {acc['std']:.4f}"
-            )
+    t = _term_styles()
+    sep = "=" * 88
+    labels = {"seganymo": "SegAnyMo", "flowsam": "FlowSAM", "genmatter": "GenMatter"}
 
-    print("\n" + "=" * 80)
-    print("SUMMARY STATISTICS - PRECISION, RECALL, F1, JACCARD")
-    print("=" * 80)
-    for name in ("seganymo", "flowsam", "genmatter"):
-        m = summary[name].get("metrics")
-        if m is None:
+    # --- Aggregate: accuracy + Jaccard only ---
+    print(f"\n{sep}")
+    print(
+        f"{t['cyan']}{t['bold']}Gestalt — aggregate (mean ± std over scene–texture combos){t['reset']}"
+    )
+    print(sep)
+
+    jac_means: list[tuple[str, float]] = []
+    for key in ("seganymo", "flowsam", "genmatter"):
+        s = summary[key]
+        acc = s["accuracy"]
+        m = s.get("metrics") or {}
+        jm = m.get("jaccard", {})
+        j_mean = jm.get("mean") if jm else None
+        if j_mean is not None and not np.isnan(j_mean):
+            jac_means.append((key, float(j_mean)))
+
+    best_key = max(jac_means, key=lambda x: x[1])[0] if jac_means else None
+
+    for key in ("seganymo", "flowsam", "genmatter"):
+        s = summary[key]
+        acc = s["accuracy"]
+        m = s.get("metrics") or {}
+        jm = m.get("jaccard", {})
+        if acc.get("mean") is None:
             continue
-        print(f"\n  {name} (N={summary[name]['n']}):")
-        for k in ("precision", "recall", "f1", "jaccard", "fpr", "fnr"):
-            print(f"    {k:12s}: {m[k]['mean']:.4f} +/- {m[k]['std']:.4f}")
+        name = labels[key]
+        is_best = key == best_key and best_key is not None
+        acc_s = _fmt_pm(acc["mean"], acc["std"])
+        jac_s = _fmt_pm(jm.get("mean"), jm.get("std")) if jm else "N/A"
+        hdr = f"{name} (N={s['n']})"
+        if is_best:
+            hdr = f"{t['bold']}{t['green']}{hdr}{t['reset']}"
+        print(f"\n{hdr}")
+        a_line = f"  Accuracy: {acc_s}"
+        j_line = f"  Jaccard:  {jac_s}"
+        if is_best:
+            a_line = f"  Accuracy: {t['bold']}{t['green']}{acc_s}{t['reset']}"
+            j_line = f"  Jaccard:  {t['bold']}{t['green']}{jac_s}{t['reset']}"
+        print(a_line)
+        print(j_line)
 
     if "comparisons" in summary:
-        print("\n" + "=" * 80)
-        print("PAIRWISE COMPARISONS - ACCURACY")
-        print("=" * 80)
+        print(f"\n{sep}")
+        print(f"{t['yellow']}{t['bold']}Paired comparisons (accuracy){t['reset']}")
+        print(t["dim"] + sep + t["reset"])
         for label, comp in summary["comparisons"].items():
             print(
-                f"\n  {label}: mean_diff={comp['mean_diff']:+.4f}  "
-                f"t={comp['t_stat']:.4f}  p={comp['p_value']:.6f}"
+                f"  {t['dim']}{label}:{t['reset']} "
+                f"Δmean={comp['mean_diff']:+.4f}  t={comp['t_stat']:.4f}  p={comp['p_value']:.6f}"
             )
 
-    # Per-scene breakdown
-    by_scene: dict[str, dict[str, list[float]]] = defaultdict(
-        lambda: {"seganymo": [], "flowsam": [], "genmatter": []}
-    )
-    for r in all_results:
-        for method in ("seganymo", "flowsam", "genmatter"):
-            val = r[f"{method}_mean"]
-            if val is not None:
-                by_scene[r["scene"]][method].append(val)
-
-    print("\n" + "=" * 80)
-    print("PER-SCENE BREAKDOWN")
-    print("=" * 80)
-    header = f"{'Scene':<15} {'N':>3}  {'SegAnyMo':>15}  {'FlowSAM':>15}  {'GenMatter':>15}"
-    print(header)
-    print("-" * len(header))
-    for scene in sorted(by_scene):
-        d = by_scene[scene]
-        if not (d["seganymo"] and d["flowsam"] and d["genmatter"]):
-            continue
-        n = len(d["seganymo"])
-        parts = []
-        for method in ("seganymo", "flowsam", "genmatter"):
-            vals = d[method]
-            parts.append(f"{np.mean(vals):.3f}+/-{np.std(vals):.3f}")
-        print(f"{scene:<15} {n:>3}  {'  '.join(f'{p:>15}' for p in parts)}")
-
-    # Per-texture breakdown
+    # --- Per-texture: accuracy + Jaccard (no per-scene table) ---
     by_texture: dict[str, dict[str, list[float]]] = defaultdict(
         lambda: {"seganymo": [], "flowsam": [], "genmatter": []}
     )
+    by_tex_j: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {"seganymo": [], "flowsam": [], "genmatter": []}
+    )
     for r in all_results:
         for method in ("seganymo", "flowsam", "genmatter"):
             val = r[f"{method}_mean"]
+            mj = r[f"{method}_metrics"]
+            jac_v = mj.get("jaccard") if mj else None
             if val is not None:
-                by_texture[r["texture"]][method].append(val)
+                by_texture[r["texture"]][method].append(float(val))
+            if jac_v is not None:
+                by_tex_j[r["texture"]][method].append(float(jac_v))
 
-    print("\n" + "=" * 80)
-    print("PER-TEXTURE BREAKDOWN")
-    print("=" * 80)
-    header = f"{'Texture':<15} {'N':>3}  {'SegAnyMo':>15}  {'FlowSAM':>15}  {'GenMatter':>15}"
-    print(header)
-    print("-" * len(header))
-    for texture in sorted(by_texture):
-        d = by_texture[texture]
-        if not (d["seganymo"] and d["flowsam"] and d["genmatter"]):
+    print(f"\n{sep}")
+    print(f"{t['cyan']}{t['bold']}Per-texture breakdown (accuracy & Jaccard){t['reset']}")
+    print(sep)
+    w = 18
+    head = (
+        f"{t['magenta']}{'Texture':<14} {'n':>3}  "
+        f"{'S.Acc':>{w}} {'S.Jac':>{w}} {'F.Acc':>{w}} {'F.Jac':>{w}} "
+        f"{'G.Acc':>{w}} {'G.Jac':>{w}}{t['reset']}"
+    )
+    print(head)
+    print(t["dim"] + "-" * 130 + t["reset"])
+
+    for texture in sorted(set(by_texture.keys()) | set(by_tex_j.keys())):
+        d_acc = by_texture.get(texture, {})
+        d_j = by_tex_j.get(texture, {})
+        if not any(d_acc.get(m) for m in ("seganymo", "flowsam", "genmatter")):
             continue
-        n = len(d["seganymo"])
-        parts = []
+        n = max(
+            (len(d_acc[m]) for m in ("seganymo", "flowsam", "genmatter") if d_acc.get(m)),
+            default=0,
+        )
+        cells: list[str] = []
+        jac_triple: list[float] = []
         for method in ("seganymo", "flowsam", "genmatter"):
-            vals = d[method]
-            parts.append(f"{np.mean(vals):.3f}+/-{np.std(vals):.3f}")
-        print(f"{texture:<15} {n:>3}  {'  '.join(f'{p:>15}' for p in parts)}")
+            av = d_acc.get(method, [])
+            jv = d_j.get(method, [])
+            am = float(np.mean(av)) if av else float("nan")
+            astd = float(np.std(av)) if av else float("nan")
+            jm = float(np.mean(jv)) if jv else float("nan")
+            jstd = float(np.std(jv)) if jv else float("nan")
+            cells.append(_fmt_pm(am, astd) if av else "N/A")
+            cells.append(_fmt_pm(jm, jstd) if jv else "N/A")
+            jac_triple.append(jm if jv else float("nan"))
+
+        finite_idx = [i for i in range(3) if not np.isnan(jac_triple[i])]
+        best_i = (
+            max(finite_idx, key=lambda i: jac_triple[i]) if finite_idx else -1
+        )
+
+        line = f"{texture:<14} {n:>3}  "
+        for i, p in enumerate(cells):
+            col_i = i // 2
+            use_green = (
+                best_i >= 0
+                and col_i == best_i
+                and i % 2 == 1
+                and not np.isnan(jac_triple[col_i])
+            )
+            cell = f"{p:>{w}}"
+            if use_green:
+                cell = f"{t['bold']}{t['green']}{cell}{t['reset']}"
+            line += cell + " "
+        print(line.rstrip())
+
+    print()
 
 
 if __name__ == "__main__":

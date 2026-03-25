@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-DAVIS TAP-Vid: build ``{video}_3d_motion.npz`` from RGB frame folders using the GenParticles
-pipeline (Video-Depth-Anything + RAFT). First import clones VDA and fetches checkpoints (see README).
+DAVIS TAP-Vid: build ``{video}_3d_motion.npz`` from RGB frame folders using Video-Depth-Anything
++ RAFT. First import clones VDA and fetches checkpoints (see README).
 
 Usage::
 
     uv run python run_experiments.py davis-extract-3d-motion
 
-Forwarded args (after ``--``) match ``process_video_to_3d_data`` / GenParticles CLI. Step progress is printed by default; use ``--verbose`` / ``-v`` for extra detail (depth/flow logs) and the RAFT tqdm bar.
+Forwarded args (after ``--``) match ``process_video_to_3d_data``. Step progress is printed by default;
+use ``--verbose`` / ``-v`` for extra detail (depth/flow logs) and the RAFT tqdm bar.
 """
 
 from __future__ import annotations
@@ -24,14 +25,14 @@ if str(_REPO_ROOT) not in sys.path:
 
 import config  # noqa: E402
 
-from preprocessing.motion_extraction_3d import genparticles_preprocess_video as gp_vda  # noqa: E402
+from preprocessing.motion_extraction_3d import vda_preprocess_video as gp_vda  # noqa: E402
 
 VDA_AVAILABLE = gp_vda.VDA_AVAILABLE
 process_video_to_3d_data = gp_vda.process_video_to_3d_data
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="DAVIS 3D motion NPZ (VDA + RAFT, GenParticles pipeline).")
+    p = argparse.ArgumentParser(description="DAVIS 3D motion NPZ (VDA + RAFT).")
     p.add_argument(
         "--rgb-base",
         type=Path,

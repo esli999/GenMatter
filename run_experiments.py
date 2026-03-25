@@ -55,6 +55,18 @@ COMMANDS = {
         "experiments/davis/run_davis_ablation.py",
         ["--use-sam"],
     ),
+    "davis-ablation-2-sam": (
+        "experiments/davis/run_davis_ablation_2.py",
+        ["--use-sam"],
+    ),
+    "davis-ablation-2-no-sam": (
+        "experiments/davis/run_davis_ablation_2.py",
+        ["--no-use-sam"],
+    ),
+    "davis-ablation-2": (
+        "experiments/davis/run_davis_ablation_2.py",
+        ["--use-sam"],
+    ),
     "cotracker": "experiments/baselines/run_cotracker.py",
     "psychophysics-benchmark": (
         "experiments/psychophysics/run_psychophysics_benchmark.py",
@@ -69,7 +81,7 @@ COMMANDS = {
         ["--mode", "rdk-ablation-adaptive"],
     ),
     "rdk-preprocess": "preprocessing/random_dot_kinematograms/run_rdk_preprocess.py",
-    "postprocess-psychophysics-correlation": "postprocessing/postprocess_psychophysics_correlation.py",
+    "postprocess-psychophysics": "postprocessing/postprocess_psychophysics_correlation.py",
     "postprocess-gestalt": "postprocessing/postprocess_gestalt.py",
     "postprocess-gestalt-ablation": "postprocessing/postprocess_gestalt.py",
     "postprocess-davis": "postprocessing/postprocess_davis.py",

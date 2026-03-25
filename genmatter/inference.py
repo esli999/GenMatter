@@ -694,6 +694,73 @@ def gibbs_blob_means(key, genmatter_state):
     return genmatter_state.replace({'blobs_state': {'blob_means': new_blob_means}})
 
 
+def gibbs_blob_means_ablation(key, genmatter_state):
+    """Blob means with zero-mean Gaussian prior (sigma_H); no hyperblob coupling."""
+    posterior_key, prior_key = jax.random.split(key)
+
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions  # [N, 3]
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments        # [N]
+    blob_covs = genmatter_state.blobs_state.blob_covs                           # [L, 3, 3]
+
+    n_blobs = genmatter_state.hypers.n_blobs
+    prior_blob_means = jnp.zeros((n_blobs, 3))
+    prior_variance = genmatter_state.hypers.sigma_H
+
+    N_l = jax.ops.segment_sum(
+        jnp.ones(datapoint_positions.shape[0], dtype=datapoint_positions.dtype),
+        blob_assignments,
+        num_segments=n_blobs
+    )
+
+    posterior_mus, posterior_covs = normal_normal_posterior_full_cov_batched_flexible_prior(
+        datapoint_positions, blob_assignments, prior_blob_means, prior_variance, blob_covs
+    )
+
+    has_points = N_l > 0
+    sampled_means = genjax.mv_normal.sample(posterior_key, posterior_mus, posterior_covs)
+
+    prior_cov = jnp.eye(3) * prior_variance
+    prior_samples = genjax.mv_normal.sample(
+        prior_key,
+        prior_blob_means,
+        jnp.tile(prior_cov[None, :, :], (n_blobs, 1, 1))
+    )
+
+    posterior_blob_means = jnp.where(has_points[:, None], sampled_means, prior_samples)
+
+    return genmatter_state.replace({'blobs_state': {'blob_means': posterior_blob_means}})
+
+
+def gibbs_blob_vel_means_ablation(key, genmatter_state):
+    """Blob velocity means with zero-mean Gaussian prior (sigma_V); no hyperblob coupling."""
+    posterior_key, _ = jax.random.split(key)
+
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments
+    likelihood_blob_vel_covs = genmatter_state.blobs_state.blob_vel_covs
+
+    n_blobs = genmatter_state.hypers.n_blobs
+    prior_blob_vel_means = jnp.zeros((n_blobs, 3))
+    prior_variance = genmatter_state.hypers.sigma_V
+
+    N_l = jax.ops.segment_sum(
+        jnp.ones(datapoint_vels.shape[0], dtype=datapoint_vels.dtype),
+        blob_assignments,
+        num_segments=n_blobs
+    )
+
+    posterior_mus, posterior_covs = normal_normal_posterior_full_cov_batched_flexible_prior(
+        datapoint_vels, blob_assignments, prior_blob_vel_means, prior_variance, likelihood_blob_vel_covs
+    )
+
+    has_points = N_l > 0
+    sampled_vel_means = genjax.mv_normal.sample(posterior_key, posterior_mus, posterior_covs)
+    zero_velocities = jnp.zeros_like(posterior_mus)
+    posterior_blob_vel_means = jnp.where(has_points[:, None], sampled_vel_means, zero_velocities)
+
+    return genmatter_state.replace({'blobs_state': {'blob_vel_means': posterior_blob_vel_means}})
+
+
 # Gibbs #11: Update hyperblob rotation velocities
 def gibbs_hyperblob_rot(key, genmatter_state: GenMatter_State, use_weighted_blobs=False):
     posterior_key, _ = jax.random.split(key)

@@ -2087,7 +2087,7 @@ def gibbs_blob_vel_means_ablation1(key, genmatter_state):
 
 
 def initialize_model_ablation1(key, npz_path, start_frame, end_frame):
-    """Flat-blob init (rdk-ablation-fixed). Uses 2 hyperblobs / 5 blobs for K-means (NeurIPS default)."""
+    """Flat-blob init (rdk-ablation-fixed). Uses 2 hyperblobs / 5 blobs for K-means."""
 
     number_of_hyperblobs = 2
     number_of_blobs = 5

@@ -22,27 +22,42 @@ sys.path.insert(0, str(_REPO))
 import config
 
 
-def _discover_benchmark_jsons(psych_dir: Path) -> list[Path]:
-    if not psych_dir.is_dir():
-        return []
-    return sorted(psych_dir.glob("*_benchmark.json"))
+def _term_styles() -> dict[str, str]:
+    if not sys.stdout.isatty():
+        return {
+            k: ""
+            for k in (
+                "reset",
+                "bold",
+                "dim",
+                "cyan",
+                "green",
+                "magenta",
+                "yellow",
+            )
+        }
+    return {
+        "reset": "\033[0m",
+        "bold": "\033[1m",
+        "dim": "\033[2m",
+        "cyan": "\033[96m",
+        "green": "\033[92m",
+        "magenta": "\033[95m",
+        "yellow": "\033[93m",
+    }
 
 
-def _render_correlation_plot(
-    inp: Path,
-    out_png: Path | None,
-    dpi: int,
-) -> Path:
-    """Load benchmark JSON, write one PNG. Raises ``ValueError`` if too few paired points."""
+def _load_paired_benchmark(inp: Path) -> tuple[np.ndarray, np.ndarray, list[bool]] | None:
+    """Return (human %, model %, gt_same_object flags) or None if <2 paired stimuli."""
     with open(inp, "r") as f:
         data = json.load(f)
 
     stimuli = data["stimuli"]
     human_results = data.get("human_results", {})
 
-    human_values = []
-    model_values = []
-    gt_flags = []
+    human_values: list[float] = []
+    model_values: list[float] = []
+    gt_flags: list[bool] = []
 
     for stim_id in sorted(stimuli.keys()):
         if stim_id not in human_results:
@@ -53,12 +68,82 @@ def _render_correlation_plot(
         gt_flags.append(bool(gt) if isinstance(gt, bool) else bool(int(gt)))
 
     if len(human_values) < 2:
-        raise ValueError(
-            f"need at least two stimuli with human results for correlation plot (got {len(human_values)})"
-        )
+        return None
 
-    human_values = np.array(human_values, dtype=np.float64)
-    model_values = np.array(model_values, dtype=np.float64)
+    return (
+        np.array(human_values, dtype=np.float64),
+        np.array(model_values, dtype=np.float64),
+        gt_flags,
+    )
+
+
+def _benchmark_label(inp: Path) -> str:
+    return inp.stem.replace("_benchmark", "")
+
+
+def _print_r2_summary_table(
+    rows: list[tuple[str, int, float, float]],
+) -> None:
+    """Pretty-print R / R² table (same metrics as plot annotation). *rows*: (label, n, r, r²)."""
+    if not rows:
+        return
+    t = _term_styles()
+    sep = "=" * 78
+    print(f"\n{sep}")
+    print(
+        f"{t['cyan']}{t['bold']}Psychophysics — human vs model correlation{t['reset']}"
+    )
+    print(
+        f"{t['dim']}(Pearson r and R²; R² matches the value shown on each plot){t['reset']}"
+    )
+    print(sep)
+    w_name = max(28, max(len(r[0]) for r in rows))
+    hdr = (
+        f"{t['magenta']}{'Benchmark':<{w_name}} {'N':>4} "
+        f"{'r':>9} {'R²':>9}{t['reset']}"
+    )
+    print(hdr)
+    print(t["dim"] + "-" * (w_name + 4 + 9 + 9 + 3) + t["reset"])
+
+    best_i = max(range(len(rows)), key=lambda i: rows[i][3])
+    for i, (label, n, r_val, r2_val) in enumerate(rows):
+        is_best = len(rows) > 1 and i == best_i
+        r_s = f"{r_val:+.4f}"
+        r2_s = f"{r2_val:.4f}"
+        if is_best:
+            line = (
+                f"{label:<{w_name}} {n:>4} "
+                f"{t['bold']}{t['green']}{r_s:>9}{t['reset']} "
+                f"{t['bold']}{t['green']}{r2_s:>9}{t['reset']}"
+            )
+        else:
+            line = f"{label:<{w_name}} {n:>4} {r_s:>9} {r2_s:>9}"
+        print(line)
+    print()
+
+
+def _discover_benchmark_jsons(psych_dir: Path) -> list[Path]:
+    if not psych_dir.is_dir():
+        return []
+    return sorted(psych_dir.glob("*_benchmark.json"))
+
+
+def _render_correlation_plot(
+    inp: Path,
+    out_png: Path | None,
+    dpi: int,
+) -> tuple[Path, float, float, int]:
+    """Load benchmark JSON, write one PNG.
+
+    Returns ``(png_path, pearson_r, r_squared, n_points)``.
+    Raises ``ValueError`` if too few paired points.
+    """
+    loaded = _load_paired_benchmark(inp)
+    if loaded is None:
+        raise ValueError(
+            "need at least two stimuli with human results for correlation plot"
+        )
+    human_values, model_values, gt_flags = loaded
     correlation, _p_value = pearsonr(human_values, model_values)
     r_squared = float(correlation**2)
 
@@ -198,7 +283,7 @@ def _render_correlation_plot(
     fig.tight_layout()
     fig.savefig(final_png, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-    return final_png
+    return final_png, float(correlation), r_squared, len(human_values)
 
 
 def main() -> int:
@@ -247,11 +332,13 @@ def main() -> int:
         print("=" * 80)
         out_arg = Path(args.output).resolve() if args.output else None
         try:
-            out = _render_correlation_plot(inp, out_arg, args.dpi)
+            out, r_val, r2_val, n_pts = _render_correlation_plot(inp, out_arg, args.dpi)
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
-        print(f"Wrote {out}")
+        tw = _term_styles()
+        print(f"{tw['dim']}Wrote {out}{tw['reset']}")
+        _print_r2_summary_table([(_benchmark_label(inp), n_pts, r_val, r2_val)])
         return 0
 
     psych_dir = args.psychophysics_dir.resolve()
@@ -271,13 +358,18 @@ def main() -> int:
         return 1
 
     ok = 0
+    table_rows: list[tuple[str, int, float, float]] = []
     for inp in paths:
         try:
-            out = _render_correlation_plot(inp, None, args.dpi)
-            print(f"Wrote {out}")
+            out, r_val, r2_val, n_pts = _render_correlation_plot(inp, None, args.dpi)
+            table_rows.append((_benchmark_label(inp), n_pts, r_val, r2_val))
+            tw = _term_styles()
+            print(f"{tw['dim']}Wrote {out}{tw['reset']}")
             ok += 1
         except ValueError as e:
             print(f"Skip {inp.name}: {e}", file=sys.stderr)
+
+    _print_r2_summary_table(table_rows)
 
     return 0 if ok else 1
 

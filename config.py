@@ -175,6 +175,9 @@ DAVIS_SUBSAMPLING_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_subsampling"
 DAVIS_SUBSAMPLING_OUTPUT_DIR_NO_SAM = RESULTS_DIR / "davis_subsampling_no_sam"
 DAVIS_ABLATION_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_ablation"
 DAVIS_ABLATION_OUTPUT_DIR_NO_SAM = RESULTS_DIR / "davis_ablation_no_sam"
+# Ablation-2: single hyperblob (K=1), large Psi_H / inflated hyperblob covs, full hyperblob Gibbs + hierarchical blob updates (legacy recipe).
+DAVIS_ABLATION_2_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_ablation_2"
+DAVIS_ABLATION_2_OUTPUT_DIR_NO_SAM = RESULTS_DIR / "davis_ablation_2_no_sam"
 
 # Legacy names — SAM runs (matches historical ``results/davis_*`` layout).
 DAVIS_TRACKING_OUTPUT_DIR = DAVIS_TRACKING_OUTPUT_DIR_SAM

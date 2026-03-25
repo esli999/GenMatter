@@ -11,7 +11,7 @@ from pathlib import Path
 
 GIT_URL = "https://github.com/DepthAnything/Video-Depth-Anything.git"
 
-# GenParticles / this port default to ``vitl`` (Large). Other encoders download on first use.
+# Defaults to ``vitl`` (Large). Other encoders download on first use.
 CHECKPOINTS: dict[str, tuple[str, str]] = {
     "vits": (
         "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth",
@@ -74,7 +74,7 @@ def ensure_checkpoint_for_encoder(vda_dir: Path, encoder: str) -> None:
 
 
 def _ensure_default_checkpoint_only(vda_dir: Path) -> None:
-    """Only the default GenParticles weight (``vitl``); matches upstream default depth model."""
+    """Only the default weight (``vitl``); matches upstream default depth model."""
     ensure_checkpoint_for_encoder(vda_dir, DEFAULT_ENCODER)
 
 

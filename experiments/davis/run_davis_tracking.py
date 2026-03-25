@@ -821,54 +821,55 @@ def process_video(video_name):
         gibbs_wtrs = init_gibbs_sweep_dino(init_gibbs_key, init_genmatter_state, num_sweeps=15)
         init_genmatter_state = gibbs_wtrs[-1].retval
 
-        # Post-Gibbs filtering (gets ignored if USE_SAM_FRAME0 is True)
-        fx = fy = FOCAL_LENGTH
-        cx = img_dims[1] / 2.0
-        cy = img_dims[0] / 2.0
+        # # Post-Gibbs filtering (gets ignored if USE_SAM_FRAME0 is True)
+        # # Disabled to match GenParticles dino_tracking_subsampling_dense_eval / run_davis_subsampling.
+        # fx = fy = FOCAL_LENGTH
+        # cx = img_dims[1] / 2.0
+        # cy = img_dims[0] / 2.0
 
-        blob_means_after_gibbs = np.array(init_genmatter_state.blobs_state.blob_means)
-        hyperblob_assignments_after_gibbs = np.array(init_genmatter_state.blobs_state.hyperblob_assignments)
+        # blob_means_after_gibbs = np.array(init_genmatter_state.blobs_state.blob_means)
+        # hyperblob_assignments_after_gibbs = np.array(init_genmatter_state.blobs_state.hyperblob_assignments)
 
-        x_2d = (blob_means_after_gibbs[:, 0] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fx + cx
-        y_2d = (blob_means_after_gibbs[:, 1] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fy + cy
-        x_2d = np.clip(x_2d.astype(int), 0, img_dims[1] - 1)
-        y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
-        pixel_indices = y_2d * img_dims[1] + x_2d
+        # x_2d = (blob_means_after_gibbs[:, 0] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fx + cx
+        # y_2d = (blob_means_after_gibbs[:, 1] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fy + cy
+        # x_2d = np.clip(x_2d.astype(int), 0, img_dims[1] - 1)
+        # y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
+        # pixel_indices = y_2d * img_dims[1] + x_2d
 
-        blob_assignments_frame0 = np.array(init_genmatter_state.datapoints_state.blob_assignments)
-        n_blobs_after_gibbs = len(blob_means_after_gibbs)
-        valid_mask = blob_assignments_frame0 < n_blobs_after_gibbs
-        datapoint_to_hyperblob = np.full(len(blob_assignments_frame0), -1, dtype=int)
-        datapoint_to_hyperblob[valid_mask] = hyperblob_assignments_after_gibbs[blob_assignments_frame0[valid_mask]]
+        # blob_assignments_frame0 = np.array(init_genmatter_state.datapoints_state.blob_assignments)
+        # n_blobs_after_gibbs = len(blob_means_after_gibbs)
+        # valid_mask = blob_assignments_frame0 < n_blobs_after_gibbs
+        # datapoint_to_hyperblob = np.full(len(blob_assignments_frame0), -1, dtype=int)
+        # datapoint_to_hyperblob[valid_mask] = hyperblob_assignments_after_gibbs[blob_assignments_frame0[valid_mask]]
 
-        hyperblob_overlaps = {}
-        for hb_idx in range(num_hyperblobs):
-            hb_mask = datapoint_to_hyperblob == hb_idx
-            overlap = np.sum(hb_mask & (first_frame_seg == 1))
-            hyperblob_overlaps[hb_idx] = overlap
+        # hyperblob_overlaps = {}
+        # for hb_idx in range(num_hyperblobs):
+        #     hb_mask = datapoint_to_hyperblob == hb_idx
+        #     overlap = np.sum(hb_mask & (first_frame_seg == 1))
+        #     hyperblob_overlaps[hb_idx] = overlap
 
-        object_hyperblob_idx = max(hyperblob_overlaps, key=hyperblob_overlaps.get)
+        # object_hyperblob_idx = max(hyperblob_overlaps, key=hyperblob_overlaps.get)
 
-        if not USE_SAM_FRAME0:
-            # get ignored if USE_SAM_FRAME0 is True
+        # if not USE_SAM_FRAME0:
+        #     # get ignored if USE_SAM_FRAME0 is True
 
-            blobs_in_object = np.where(hyperblob_assignments_after_gibbs == object_hyperblob_idx)[0]
-            blobs_to_reassign = []
-            for blob_idx in blobs_in_object:
-                pixel_idx = pixel_indices[blob_idx]
-                if pixel_idx >= len(first_frame_seg) or not first_frame_seg[pixel_idx]:
-                    blobs_to_reassign.append(blob_idx)
+        #     blobs_in_object = np.where(hyperblob_assignments_after_gibbs == object_hyperblob_idx)[0]
+        #     blobs_to_reassign = []
+        #     for blob_idx in blobs_in_object:
+        #         pixel_idx = pixel_indices[blob_idx]
+        #         if pixel_idx >= len(first_frame_seg) or not first_frame_seg[pixel_idx]:
+        #             blobs_to_reassign.append(blob_idx)
 
-            if len(blobs_to_reassign) > 0:
-                background_hyperblobs = [hb for hb in range(num_hyperblobs) if hb != object_hyperblob_idx]
-                background_blob_counts = {hb: np.sum(hyperblob_assignments_after_gibbs == hb) for hb in background_hyperblobs}
-                target_background_hb = max(background_blob_counts, key=background_blob_counts.get)
-                updated_hyperblob_assignments = jnp.array(hyperblob_assignments_after_gibbs)
-                for blob_idx in blobs_to_reassign:
-                    updated_hyperblob_assignments = updated_hyperblob_assignments.at[blob_idx].set(target_background_hb)
-                init_genmatter_state = init_genmatter_state.replace({
-                    'blobs_state': {'hyperblob_assignments': updated_hyperblob_assignments}
-                })
+        #     if len(blobs_to_reassign) > 0:
+        #         background_hyperblobs = [hb for hb in range(num_hyperblobs) if hb != object_hyperblob_idx]
+        #         background_blob_counts = {hb: np.sum(hyperblob_assignments_after_gibbs == hb) for hb in background_hyperblobs}
+        #         target_background_hb = max(background_blob_counts, key=background_blob_counts.get)
+        #         updated_hyperblob_assignments = jnp.array(hyperblob_assignments_after_gibbs)
+        #         for blob_idx in blobs_to_reassign:
+        #             updated_hyperblob_assignments = updated_hyperblob_assignments.at[blob_idx].set(target_background_hb)
+        #         init_genmatter_state = init_genmatter_state.replace({
+        #             'blobs_state': {'hyperblob_assignments': updated_hyperblob_assignments}
+        #         })
 
         # Track over time (optional JIT warmup + timed run for FPS)
         key, tracking_key = jax.random.split(key)

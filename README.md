@@ -104,17 +104,21 @@ uv run python run_experiments.py gestalt
 uv run python run_experiments.py gestalt-depth-ablation
 
 # DAVIS + baselines
-# Three experiment types (full-grid tracking, hyperblob ablation, subsampling tradeoff), each with SAM on or off:
+# Full-grid tracking, two hyperblob ablations, subsampling tradeoff — each with SAM on or off:
 uv run python run_experiments.py davis-tracking-sam
 uv run python run_experiments.py davis-tracking-no-sam
+# Ablation (K=9): frozen hyperblob Gibbs, zero-mean blob mean/vel priors → results/davis_ablation/
 uv run python run_experiments.py davis-ablation-sam
 uv run python run_experiments.py davis-ablation-no-sam
+# Ablation-2 (legacy): K=1, large Ψ_H (1e⁶·I), inflated k-means hyperblob covs, full hyperblob Gibbs → results/davis_ablation_2/
+uv run python run_experiments.py davis-ablation-2-sam
+uv run python run_experiments.py davis-ablation-2-no-sam
 uv run python run_experiments.py davis-subsampling-sam
 uv run python run_experiments.py davis-subsampling-no-sam
-# Short names davis-tracking, davis-ablation, and davis-subsampling are aliases for the *-sam commands.
+
 uv run python run_experiments.py cotracker
 
-# RDK
+# RDK (Table 1 Results from Paper)
 uv run python run_experiments.py psychophysics-benchmark
 uv run python run_experiments.py psychophysics-rdk-ablation-fixed
 uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
@@ -125,10 +129,10 @@ uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
 ```bash
 uv run python run_experiments.py postprocess-gestalt
 uv run python run_experiments.py postprocess-davis
-uv run python run_experiments.py postprocess-psychophysics-correlation
+uv run python run_experiments.py postprocess-psychophysics
 ```
 
-Outputs: `results/postprocessing/*.json`, `*.csv`, and psychophysics `*.png` when using the correlation command.
+Outputs: `results/postprocessing/`.
 
 ---
 
