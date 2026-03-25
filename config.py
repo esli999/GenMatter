@@ -178,6 +178,9 @@ DAVIS_ABLATION_OUTPUT_DIR_NO_SAM = RESULTS_DIR / "davis_ablation_no_sam"
 # Ablation-2: single hyperblob (K=1), large Psi_H / inflated hyperblob covs, full hyperblob Gibbs + hierarchical blob updates (legacy recipe).
 DAVIS_ABLATION_2_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_ablation_2"
 DAVIS_ABLATION_2_OUTPUT_DIR_NO_SAM = RESULTS_DIR / "davis_ablation_2_no_sam"
+# Ablation-3: same large-Ψ_H init as ablation-2, but frozen hyperblob Gibbs during tracking.
+DAVIS_ABLATION_3_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_ablation_3"
+DAVIS_ABLATION_3_OUTPUT_DIR_NO_SAM = RESULTS_DIR / "davis_ablation_3_no_sam"
 
 # Legacy names — SAM runs (matches historical ``results/davis_*`` layout).
 DAVIS_TRACKING_OUTPUT_DIR = DAVIS_TRACKING_OUTPUT_DIR_SAM

@@ -104,15 +104,18 @@ uv run python run_experiments.py gestalt
 uv run python run_experiments.py gestalt-depth-ablation
 
 # DAVIS + baselines
-# Full-grid tracking, two hyperblob ablations, subsampling tradeoff — each with SAM on or off:
+# Full-grid tracking, three DAVIS ablations, subsampling tradeoff — each with SAM on or off:
 uv run python run_experiments.py davis-tracking-sam
 uv run python run_experiments.py davis-tracking-no-sam
-# Ablation (K=9): frozen hyperblob Gibbs, zero-mean blob mean/vel priors → results/davis_ablation/
+# Ablation-1 (K=9): frozen hyperblob Gibbs, zero-mean blob mean/vel priors → results/davis_ablation/
 uv run python run_experiments.py davis-ablation-sam
 uv run python run_experiments.py davis-ablation-no-sam
-# Ablation-2 (legacy): K=1, large Ψ_H (1e⁶·I), inflated k-means hyperblob covs, full hyperblob Gibbs → results/davis_ablation_2/
+# Ablation-2: same hypers as the large-Ψ_H setup (K=1, large Ψ_H, inflated k-means hyperblob covs), full hyperblob Gibbs during tracking → results/davis_ablation_2/
 uv run python run_experiments.py davis-ablation-2-sam
 uv run python run_experiments.py davis-ablation-2-no-sam
+# Ablation-3: same init/hypers as ablation-2, but no hyperblob Gibbs during tracking (hyperblobs fixed after init) → results/davis_ablation_3/
+uv run python run_experiments.py davis-ablation-3-sam
+uv run python run_experiments.py davis-ablation-3-no-sam
 uv run python run_experiments.py davis-subsampling-sam
 uv run python run_experiments.py davis-subsampling-no-sam
 
