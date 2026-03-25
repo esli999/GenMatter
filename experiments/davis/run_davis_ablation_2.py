@@ -65,7 +65,7 @@ DINO_PATH_TEMPLATE = str(config.DAVIS_DINO_PATH / '{}_dino_pca_per_pixel.npz')
 SAM_FRAME0_PATH_TEMPLATE = str(config.DAVIS_SAM_FRAME0_PATH / '{}_SAM_frame0.png')
 
 # Output directory (overridden by davis_run_cli from --use-sam / --no-use-sam)
-EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_2_OUTPUT_DIR)
+EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_2_OUTPUT_DIR_SAM)
 
 # Model hyperparameters
 NUM_BLOBS = 500
