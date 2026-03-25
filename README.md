@@ -98,24 +98,31 @@ uv run python run_experiments.py rdk-preprocess
 
 ## How to run experiments
 
+### DAVIS ablations (1–4)
+
+| Ablation | Ψ_H | Hyperblob Gibbs (tracking) | Main idea |
+|----------|-----|------------------------------|-----------|
+| **1** | Empirical (median k-means hyperblob cov, ROI) | Off | K=9; frozen hyperblobs + zero-mean blob mean/vel priors (`results/davis_ablation/`) |
+| **2** | 1e⁶·I | On | Large-Ψ_H recipe: inflated k-means hyperblob covs; full hyperblob Gibbs each frame (`results/davis_ablation_2/`) |
+| **3** | 1e⁶·I | Off | Same as **2**, but hyperblobs fixed after init (no hyperblob Gibbs while tracking) (`results/davis_ablation_3/`) |
+| **4** | Empirical (as **1**) | Off | Same as **3**, but Ψ_H from k-means like **1** instead of 1e⁶·I (`results/davis_ablation_4/`) |
+
 ```bash
 # Gestalt (after Gestalt wget under [Data](#data))
 uv run python run_experiments.py gestalt
 uv run python run_experiments.py gestalt-depth-ablation
 
-# DAVIS + baselines
-# Full-grid tracking, three DAVIS ablations, subsampling tradeoff — each with SAM on or off:
+# DAVIS + baselines (full-grid tracking, subsampling — SAM or GT init via flags)
 uv run python run_experiments.py davis-tracking-sam
 uv run python run_experiments.py davis-tracking-no-sam
-# Ablation-1 (K=9): frozen hyperblob Gibbs, zero-mean blob mean/vel priors → results/davis_ablation/
 uv run python run_experiments.py davis-ablation-sam
 uv run python run_experiments.py davis-ablation-no-sam
-# Ablation-2: same hypers as the large-Ψ_H setup (K=1, large Ψ_H, inflated k-means hyperblob covs), full hyperblob Gibbs during tracking → results/davis_ablation_2/
 uv run python run_experiments.py davis-ablation-2-sam
 uv run python run_experiments.py davis-ablation-2-no-sam
-# Ablation-3: same init/hypers as ablation-2, but no hyperblob Gibbs during tracking (hyperblobs fixed after init) → results/davis_ablation_3/
 uv run python run_experiments.py davis-ablation-3-sam
 uv run python run_experiments.py davis-ablation-3-no-sam
+uv run python run_experiments.py davis-ablation-4-sam
+uv run python run_experiments.py davis-ablation-4-no-sam
 uv run python run_experiments.py davis-subsampling-sam
 uv run python run_experiments.py davis-subsampling-no-sam
 

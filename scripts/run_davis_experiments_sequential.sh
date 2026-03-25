@@ -61,6 +61,18 @@ run_step "3 davis-ablation-2-sam" \
 run_step "4 davis-ablation-2-no-sam" \
   uv run python run_experiments.py davis-ablation-2-no-sam
 
+run_step "5 davis-ablation-3-sam" \
+  uv run python run_experiments.py davis-ablation-3-sam
+
+run_step "6 davis-ablation-3-no-sam" \
+  uv run python run_experiments.py davis-ablation-3-no-sam
+
+run_step "7 davis-ablation-4-sam" \
+  uv run python run_experiments.py davis-ablation-4-sam
+
+run_step "8 davis-ablation-4-no-sam" \
+  uv run python run_experiments.py davis-ablation-4-no-sam
+
 run_step "5 postprocess-davis" \
   uv run python run_experiments.py postprocess-davis
 
