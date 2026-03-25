@@ -52,8 +52,8 @@ run_step() {
 run_step "1 davis-ablation-sam" \
   uv run python run_experiments.py davis-ablation-sam
 
-run_step "2 davis-ablation-no-sam" \
-  uv run python run_experiments.py davis-ablation-no-sam
+run_step "2 davis-ablation-gt-init" \
+  uv run python run_experiments.py davis-ablation-gt-init
 
 run_step "3 postprocess-davis" \
   uv run python run_experiments.py postprocess-davis

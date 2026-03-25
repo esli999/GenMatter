@@ -61,7 +61,7 @@ DAVIS_RGB_PATH = str(config.DAVIS_RGB_PATH)
 DINO_PATH_TEMPLATE = str(config.DAVIS_DINO_PATH / '{}_dino_pca_per_pixel.npz')
 SAM_FRAME0_PATH_TEMPLATE = str(config.DAVIS_SAM_FRAME0_PATH / '{}_SAM_frame0.png')
 
-# Output directory (overridden by davis_run_cli from --use-sam / --no-use-sam)
+# Output directory (overridden by davis_run_cli from --gt-init)
 EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_OUTPUT_DIR_SAM)
 
 # Model hyperparameters
@@ -1236,7 +1236,7 @@ if __name__ == "__main__":
     import davis_run_cli
 
     _parser = argparse.ArgumentParser(description="DAVIS DINO ablation")
-    davis_run_cli.add_use_sam_args(_parser)
+    davis_run_cli.add_frame0_init_args(_parser)
     davis_run_cli.add_save_3wide_video_args(_parser)
     _args = _parser.parse_args()
     davis_run_cli.configure_experiment_module(sys.modules[__name__], _args, "ablation")

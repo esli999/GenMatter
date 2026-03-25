@@ -1,12 +1,12 @@
 """DAVIS tracking postprocessing: compare GenMatter, CoTracker, subsampling, and ablation.
 
 Loads per-video JSON results from DAVIS full-grid tracking (SAM), **ablation**
-(SAM and no-SAM — including ``subsample_*`` subfolders when a run is not at 100% grid),
-SAM and no-SAM subsampling runs, and CoTracker.  Extracts
+(SAM and GT-init — including ``subsample_*`` subfolders when a run is not at 100% grid),
+SAM and GT-init subsampling runs, and CoTracker.  Extracts
 **matter-weighted recall, precision, and Jaccard (fixed frame-0 weights)** plus FPS as
 the GenMatter metrics, aggregates across videos, and writes:
 
-- results/postprocessing/davis_comparison.json   (all methods side-by-side, incl. ablations)
+- results/postprocessing/davis_comparison.json   (CoTracker, full-grid DINO, subsampling, ablation — side-by-side)
 - results/postprocessing/davis_subsampling_tradeoff.json  (subsample % vs perf)
 - results/postprocessing/davis_results.csv
 """
@@ -425,16 +425,16 @@ def build_comparison(
     dino_results: dict[str, dict[str, Any]],
     cotracker_results: dict[str, dict[str, Any]],
     ablation_sam: dict[str, dict[str, Any]] | None = None,
-    ablation_no_sam: dict[str, dict[str, Any]] | None = None,
+    ablation_gt_init: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build per-video comparison: CoTracker, full DINO tracking, optional ablation runs."""
     ablation_sam = ablation_sam or {}
-    ablation_no_sam = ablation_no_sam or {}
+    ablation_gt_init = ablation_gt_init or {}
     all_videos = sorted(
         set(dino_results)
         | set(cotracker_results)
         | set(ablation_sam)
-        | set(ablation_no_sam)
+        | set(ablation_gt_init)
     )
     rows: list[dict[str, Any]] = []
 
@@ -442,7 +442,7 @@ def build_comparison(
         dino = dino_results.get(video, {})
         ct = cotracker_results.get(video, {})
         ab_s = ablation_sam.get(video, {})
-        ab_n = ablation_no_sam.get(video, {})
+        ab_n = ablation_gt_init.get(video, {})
 
         ct_fn_rate = ct.get("mean_fn_rate", float("nan"))
         ct_fp_rate = ct.get("mean_fp_rate", float("nan"))
@@ -487,16 +487,16 @@ def build_comparison(
                 "matter_weighted_precision_fixed", float("nan")
             ),
             "ablation_sam_fps": ab_s.get("fps", float("nan")),
-            "ablation_no_sam_matter_jaccard_fixed": ab_n.get(
+            "ablation_gt_init_matter_jaccard_fixed": ab_n.get(
                 "matter_weighted_jaccard_fixed", float("nan")
             ),
-            "ablation_no_sam_matter_recall_fixed": ab_n.get(
+            "ablation_gt_init_matter_recall_fixed": ab_n.get(
                 "matter_weighted_recall_fixed", float("nan")
             ),
-            "ablation_no_sam_matter_precision_fixed": ab_n.get(
+            "ablation_gt_init_matter_precision_fixed": ab_n.get(
                 "matter_weighted_precision_fixed", float("nan")
             ),
-            "ablation_no_sam_fps": ab_n.get("fps", float("nan")),
+            "ablation_gt_init_fps": ab_n.get("fps", float("nan")),
         }
         rows.append(row)
 
@@ -667,13 +667,13 @@ def _video_union(
 def print_davis_analysis_report(
     *,
     dino_sam: dict[str, dict[str, Any]],
-    dino_no_sam: dict[str, dict[str, Any]],
+    dino_gt_init: dict[str, dict[str, Any]],
     sub_sam: dict[float, dict[str, dict[str, Any]]],
-    sub_no_sam: dict[float, dict[str, dict[str, Any]]],
+    sub_gt_init: dict[float, dict[str, dict[str, Any]]],
     ablation_sam: dict[str, dict[str, Any]],
-    ablation_no_sam: dict[str, dict[str, Any]],
+    ablation_gt_init: dict[str, dict[str, Any]],
     meta_ab_sam: dict[str, Any],
-    meta_ab_no: dict[str, Any],
+    meta_ab_gt_init: dict[str, Any],
     ct_results: dict[str, dict[str, Any]],
 ) -> None:
     """Pretty-print video-by-video (SAM vs GT init) and aggregate mean±std tables."""
@@ -713,17 +713,17 @@ def print_davis_analysis_report(
         include_full=bool(dino_sam),
     )
     col_no = build_column_specs(
-        dino_full=dino_no_sam,
-        sub=sub_no_sam,
-        ablation=ablation_no_sam,
-        include_full=bool(dino_no_sam),
+        dino_full=dino_gt_init,
+        sub=sub_gt_init,
+        ablation=ablation_gt_init,
+        include_full=bool(dino_gt_init),
     )
 
     videos_sam = _video_union(
         ct_results, dino_sam, ablation_sam, *list(sub_sam.values())
     )
     videos_no = _video_union(
-        ct_results, dino_no_sam, ablation_no_sam, *list(sub_no_sam.values())
+        ct_results, dino_gt_init, ablation_gt_init, *list(sub_gt_init.values())
     )
 
     def _fit_header(text: str, width: int) -> str:
@@ -793,7 +793,7 @@ def print_davis_analysis_report(
     print(sep)
 
     ab_lab_s = _ablation_column_label(meta_ab_sam)
-    ab_lab_n = _ablation_column_label(meta_ab_no)
+    ab_lab_n = _ablation_column_label(meta_ab_gt_init)
 
     agg_rows: list[tuple[str, str, list[float], list[float]]] = []
 
@@ -813,16 +813,16 @@ def print_davis_analysis_report(
         agg_rows.append(("CoTracker", "—", js, [float("nan")] * len(js)))
     if dino_sam:
         collect_series("full", "SAM", dino_sam)
-    if dino_no_sam:
-        collect_series("full", "GT", dino_no_sam)
-    all_pcts = sorted(set(sub_sam.keys()) | set(sub_no_sam.keys()), reverse=True)
+    if dino_gt_init:
+        collect_series("full", "GT", dino_gt_init)
+    all_pcts = sorted(set(sub_sam.keys()) | set(sub_gt_init.keys()), reverse=True)
     for pct in all_pcts:
         if pct in sub_sam:
             collect_series(_fraction_label_for_pct(pct), "SAM", sub_sam[pct])
-        if pct in sub_no_sam:
-            collect_series(_fraction_label_for_pct(pct), "GT", sub_no_sam[pct])
+        if pct in sub_gt_init:
+            collect_series(_fraction_label_for_pct(pct), "GT", sub_gt_init[pct])
     collect_series(ab_lab_s, "SAM", ablation_sam)
-    collect_series(ab_lab_n, "GT", ablation_no_sam)
+    collect_series(ab_lab_n, "GT", ablation_gt_init)
 
     _FRACS_IN_ORDER: tuple[str, ...] = tuple(PCT_TO_FRACTION_LABEL.values())
 
@@ -902,13 +902,13 @@ def _print_davis_inputs_loaded(
     *,
     ct_results: dict[str, dict[str, Any]],
     dino_sam: dict[str, dict[str, Any]],
-    dino_no_sam: dict[str, dict[str, Any]],
+    dino_gt_init: dict[str, dict[str, Any]],
     sub_sam: dict[float, dict[str, dict[str, Any]]],
-    sub_no_sam: dict[float, dict[str, dict[str, Any]]],
+    sub_gt_init: dict[float, dict[str, dict[str, Any]]],
     ablation_sam: dict[str, dict[str, Any]],
-    ablation_no_sam: dict[str, dict[str, Any]],
+    ablation_gt_init: dict[str, dict[str, Any]],
     meta_ab_sam: dict[str, Any],
-    meta_ab_no: dict[str, Any],
+    meta_ab_gt_init: dict[str, Any],
 ) -> None:
     """Single compact, colored summary of which result trees were found (omit missing)."""
     t = _term_styles()
@@ -936,12 +936,12 @@ def _print_davis_inputs_loaded(
             True,
             f"({len(dino_sam)} videos)",
         )
-    if dino_no_sam:
+    if dino_gt_init:
         line(
             "DINO full-grid (GT init)",
-            config.DAVIS_TRACKING_OUTPUT_DIR_NO_SAM,
+            config.DAVIS_TRACKING_OUTPUT_DIR_GT_INIT,
             True,
-            f"({len(dino_no_sam)} videos)",
+            f"({len(dino_gt_init)} videos)",
         )
     if sub_sam:
         line(
@@ -950,19 +950,19 @@ def _print_davis_inputs_loaded(
             True,
             f"({len(sub_sam)} level(s))",
         )
-    if sub_no_sam:
+    if sub_gt_init:
         line(
             "Subsampling (GT init)",
-            config.DAVIS_SUBSAMPLING_OUTPUT_DIR_NO_SAM,
+            config.DAVIS_SUBSAMPLING_OUTPUT_DIR_GT_INIT,
             True,
-            f"({len(sub_no_sam)} level(s))",
+            f"({len(sub_gt_init)} level(s))",
         )
     if ablation_sam:
         note = _ablation_load_note(meta_ab_sam, dino_sam, sub_sam, "SAM")
         line("Ablation (SAM)", config.DAVIS_ABLATION_OUTPUT_DIR_SAM, True, note)
-    if ablation_no_sam:
-        note = _ablation_load_note(meta_ab_no, dino_no_sam, sub_no_sam, "GT")
-        line("Ablation (GT init)", config.DAVIS_ABLATION_OUTPUT_DIR_NO_SAM, True, note)
+    if ablation_gt_init:
+        note = _ablation_load_note(meta_ab_gt_init, dino_gt_init, sub_gt_init, "GT")
+        line("Ablation (GT init)", config.DAVIS_ABLATION_OUTPUT_DIR_GT_INIT, True, note)
     print()
 
 
@@ -977,28 +977,28 @@ def main() -> None:
     dino_results = load_dino_tracking_results(
         config.DAVIS_TRACKING_OUTPUT_DIR_SAM, silent_empty=True
     )
-    dino_no_sam = load_dino_tracking_results(
-        config.DAVIS_TRACKING_OUTPUT_DIR_NO_SAM, silent_empty=True
+    dino_gt_init = load_dino_tracking_results(
+        config.DAVIS_TRACKING_OUTPUT_DIR_GT_INIT, silent_empty=True
     )
     sub_sam = load_subsampling_results(config.DAVIS_SUBSAMPLING_OUTPUT_DIR_SAM)
-    sub_no_sam = load_subsampling_results(config.DAVIS_SUBSAMPLING_OUTPUT_DIR_NO_SAM)
+    sub_gt_init = load_subsampling_results(config.DAVIS_SUBSAMPLING_OUTPUT_DIR_GT_INIT)
     ablation_sam, meta_ab_sam = load_dino_ablation_results(
         config.DAVIS_ABLATION_OUTPUT_DIR_SAM, silent=True
     )
-    ablation_no_sam, meta_ab_no = load_dino_ablation_results(
-        config.DAVIS_ABLATION_OUTPUT_DIR_NO_SAM, silent=True
+    ablation_gt_init, meta_ab_gt_init = load_dino_ablation_results(
+        config.DAVIS_ABLATION_OUTPUT_DIR_GT_INIT, silent=True
     )
     _print_davis_inputs_loaded(
         out_dir,
         ct_results=ct_results,
         dino_sam=dino_results,
-        dino_no_sam=dino_no_sam,
+        dino_gt_init=dino_gt_init,
         sub_sam=sub_sam,
-        sub_no_sam=sub_no_sam,
+        sub_gt_init=sub_gt_init,
         ablation_sam=ablation_sam,
-        ablation_no_sam=ablation_no_sam,
+        ablation_gt_init=ablation_gt_init,
         meta_ab_sam=meta_ab_sam,
-        meta_ab_no=meta_ab_no,
+        meta_ab_gt_init=meta_ab_gt_init,
     )
 
     print(f"{t['dim']}Building comparison & printing tables…{t['reset']}")
@@ -1008,32 +1008,32 @@ def main() -> None:
         dino_results,
         ct_results,
         ablation_sam=ablation_sam,
-        ablation_no_sam=ablation_no_sam,
+        ablation_gt_init=ablation_gt_init,
     )
 
-    # ---- Build subsampling tradeoff (prefer SAM, fallback to no-SAM) ------
-    subsampling_source = sub_sam if sub_sam else sub_no_sam
+    # ---- Build subsampling tradeoff (prefer SAM, fallback to GT-init) ------
+    subsampling_source = sub_sam if sub_sam else sub_gt_init
     subsampling_tradeoff = build_subsampling_tradeoff(subsampling_source)
 
-    # If both SAM and no-SAM available, include both in the tradeoff JSON
+    # If both SAM and GT-init available, include both in the tradeoff JSON
     combined_tradeoff: dict[str, Any] = {}
     if sub_sam:
         combined_tradeoff["sam"] = build_subsampling_tradeoff(sub_sam)
-    if sub_no_sam:
-        combined_tradeoff["no_sam"] = build_subsampling_tradeoff(sub_no_sam)
+    if sub_gt_init:
+        combined_tradeoff["gt_init"] = build_subsampling_tradeoff(sub_gt_init)
     if not combined_tradeoff:
         combined_tradeoff["default"] = subsampling_tradeoff
 
     # ---- Print analysis to stdout -----------------------------------------
     print_davis_analysis_report(
         dino_sam=dino_results,
-        dino_no_sam=dino_no_sam,
+        dino_gt_init=dino_gt_init,
         sub_sam=sub_sam,
-        sub_no_sam=sub_no_sam,
+        sub_gt_init=sub_gt_init,
         ablation_sam=ablation_sam,
-        ablation_no_sam=ablation_no_sam,
+        ablation_gt_init=ablation_gt_init,
         meta_ab_sam=meta_ab_sam,
-        meta_ab_no=meta_ab_no,
+        meta_ab_gt_init=meta_ab_gt_init,
         ct_results=ct_results,
     )
 
@@ -1099,22 +1099,22 @@ def main() -> None:
                     ]
                 ),
             },
-            "dino_ablation_no_sam": {
+            "dino_ablation_gt_init": {
                 "matter_jaccard_fixed_mean": _safe_mean(
                     [
-                        r["ablation_no_sam_matter_jaccard_fixed"]
+                        r["ablation_gt_init_matter_jaccard_fixed"]
                         for r in comparison
                         if not np.isnan(
-                            r.get("ablation_no_sam_matter_jaccard_fixed", float("nan"))
+                            r.get("ablation_gt_init_matter_jaccard_fixed", float("nan"))
                         )
                     ]
                 ),
                 "matter_jaccard_fixed_std": _safe_std(
                     [
-                        r["ablation_no_sam_matter_jaccard_fixed"]
+                        r["ablation_gt_init_matter_jaccard_fixed"]
                         for r in comparison
                         if not np.isnan(
-                            r.get("ablation_no_sam_matter_jaccard_fixed", float("nan"))
+                            r.get("ablation_gt_init_matter_jaccard_fixed", float("nan"))
                         )
                     ]
                 ),
@@ -1122,7 +1122,7 @@ def main() -> None:
         },
         "ablation_loading": {
             "sam": meta_ab_sam,
-            "no_sam": meta_ab_no,
+            "gt_init": meta_ab_gt_init,
         },
         "davis_videos": DAVIS_VIDEOS,
     }

@@ -17,6 +17,26 @@ From the repository root:
 uv sync
 ```
 
+## How to run (CLI)
+
+Every experiment and postprocessing step is invoked the same way:
+
+```bash
+uv run python run_experiments.py <command>
+```
+
+`<command>` is one of the keys in `run_experiments.py` (for a full list, run `uv run python run_experiments.py -h`). Common groups:
+
+| Area | Commands | Default output under `results/` (see `config.py` to override) |
+|------|----------|----------------------------------------------------------------|
+| Gestalt | `gestalt`, `gestalt-depth-ablation` | `gestalt/`, `gestalt_depth_ablation/` |
+| DAVIS preprocess | `download-tapvid-davis`, `davis-preprocess`, `davis-extract-dino`, … | Writes under `assets/tapvid_davis_30_videos_processed/` |
+| DAVIS experiments | `davis-tracking-sam`, `davis-tracking-gt-init`, `davis-subsampling-sam`, `davis-subsampling-gt-init`, `davis-ablation-sam`, `davis-ablation-gt-init`, `cotracker` | `davis_tracking/`, `davis_subsampling/`, `davis_ablation/`, `cotracker_baseline/`, and `*_gt_init` variants for TAP-Vid frame-0 init |
+| RDK | `rdk-preprocess`, `psychophysics-benchmark`, `psychophysics-rdk-ablation-fixed`, `psychophysics-rdk-ablation-adaptive` | `psychophysics/` (and assets under `assets/RDK/`) |
+| Postprocessing | `postprocess-gestalt`, `postprocess-davis`, `postprocess-psychophysics` | `postprocessing/` |
+
+**Typical DAVIS order:** put data under `assets/` (S3 download or `download-tapvid-davis` + `davis-preprocess`) → run tracking / subsampling / ablation / cotracker as needed → `postprocess-davis`.
+
 ## Data
 
 The paper has **three** experiments. Put all data for the experiments under **`assets/`** at the repository root (that directory is gitignored).
@@ -96,30 +116,31 @@ uv run python run_experiments.py rdk-preprocess
 
 ---
 
-## How to run experiments
+## Example commands (copy-paste)
+
+After [data](#data) is in place:
 
 ```bash
-# Gestalt (after Gestalt wget under [Data](#data))
+# Gestalt
 uv run python run_experiments.py gestalt
 uv run python run_experiments.py gestalt-depth-ablation
 
-# DAVIS + baselines (full-grid tracking, subsampling — SAM or GT init via flags)
+# DAVIS — SAM vs GT frame-0 init (pair as you need)
 uv run python run_experiments.py davis-tracking-sam
-uv run python run_experiments.py davis-tracking-no-sam
-uv run python run_experiments.py davis-ablation-sam
-uv run python run_experiments.py davis-ablation-no-sam
+uv run python run_experiments.py davis-tracking-gt-init
 uv run python run_experiments.py davis-subsampling-sam
-uv run python run_experiments.py davis-subsampling-no-sam
-
+uv run python run_experiments.py davis-subsampling-gt-init
+uv run python run_experiments.py davis-ablation-sam
+uv run python run_experiments.py davis-ablation-gt-init
 uv run python run_experiments.py cotracker
 
-# RDK (Table 1 Results from Paper)
+# RDK / psychophysics
 uv run python run_experiments.py psychophysics-benchmark
 uv run python run_experiments.py psychophysics-rdk-ablation-fixed
 uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
 ```
 
-**Postprocessing** (after the matching runs have written under `results/`):
+**Postprocessing** (run after the corresponding experiments have written JSON under `results/`):
 
 ```bash
 uv run python run_experiments.py postprocess-gestalt
@@ -127,10 +148,14 @@ uv run python run_experiments.py postprocess-davis
 uv run python run_experiments.py postprocess-psychophysics
 ```
 
-Outputs: `results/postprocessing/`.
+Aggregated tables and CSVs: `results/postprocessing/`.
 
 ---
 
 ## Configuration
 
 Paths, defaults, and experiment constants live in **`config.py`**, including environment variables you can set to override locations (data roots, results, optional SegAnyMo paths, and similar). Edit that file or export the variables it reads to match your machine.
+
+## License
+
+This project is licensed under the MIT License; see [`LICENSE`](LICENSE).

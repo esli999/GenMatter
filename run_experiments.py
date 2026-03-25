@@ -18,42 +18,42 @@ COMMANDS = {
     "davis-extract-3d-motion": "preprocessing/motion_extraction_3d/run_davis_3d_motion.py",
     "download-tapvid-davis": "scripts/download_tapvid_davis.py",
     "davis-preprocess": "scripts/davis_preprocess.py",
-    # DAVIS: 3 experiment types × SAM on/off (six runners). Legacy names = SAM (same as ``*-sam``).
+    # DAVIS: 3 experiment types × SAM vs GT-init (six runners). Legacy names = SAM (same as ``*-sam``).
     "davis-tracking-sam": (
         "experiments/davis/run_davis_tracking.py",
-        ["--use-sam"],
+        [],
     ),
-    "davis-tracking-no-sam": (
+    "davis-tracking-gt-init": (
         "experiments/davis/run_davis_tracking.py",
-        ["--no-use-sam"],
+        ["--gt-init"],
     ),
     "davis-tracking": (
         "experiments/davis/run_davis_tracking.py",
-        ["--use-sam"],
+        [],
     ),
     "davis-subsampling-sam": (
         "experiments/davis/run_davis_subsampling.py",
-        ["--use-sam"],
+        [],
     ),
-    "davis-subsampling-no-sam": (
+    "davis-subsampling-gt-init": (
         "experiments/davis/run_davis_subsampling.py",
-        ["--no-use-sam"],
+        ["--gt-init"],
     ),
     "davis-subsampling": (
         "experiments/davis/run_davis_subsampling.py",
-        ["--use-sam"],
+        [],
     ),
     "davis-ablation-sam": (
         "experiments/davis/run_davis_ablation.py",
-        ["--use-sam"],
+        [],
     ),
-    "davis-ablation-no-sam": (
+    "davis-ablation-gt-init": (
         "experiments/davis/run_davis_ablation.py",
-        ["--no-use-sam"],
+        ["--gt-init"],
     ),
     "davis-ablation": (
         "experiments/davis/run_davis_ablation.py",
-        ["--use-sam"],
+        [],
     ),
     "cotracker": "experiments/baselines/run_cotracker.py",
     "psychophysics-benchmark": (

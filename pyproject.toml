@@ -7,6 +7,7 @@ name = "genmatter"
 version = "0.1.0"
 description = "Probabilistic 3D particle tracking for motion segmentation"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "torch==2.6.0+cu124",
