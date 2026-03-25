@@ -1,5 +1,4 @@
 # GenMatter Tracking with DINO Features - Batch Processing
-# Clean implementation for running experiments on multiple videos
 
 import os
 import json
@@ -62,13 +61,13 @@ DAVIS_RGB_PATH = str(config.DAVIS_RGB_PATH)
 DINO_PATH_TEMPLATE = str(config.DAVIS_DINO_PATH / '{}_dino_pca_per_pixel.npz')
 SAM_FRAME0_PATH_TEMPLATE = str(config.DAVIS_SAM_FRAME0_PATH / '{}_SAM_frame0.png')
 
-# Output directory
-EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_OUTPUT_DIR)
+# Output directory (overridden by davis_run_cli from --use-sam / --no-use-sam)
+EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_OUTPUT_DIR_SAM)
 
 # Model hyperparameters
 NUM_BLOBS = 500
-# Ablation (NeurIPS-style): K=9 hyperblobs; all hyperblob Gibbs moves off (frozen after k-means + importance).
 NUM_HYPERBLOBS_ORIGINAL = 9
+# NUM_HYPERBLOBS_ORIGINAL = 1
 FOCAL_LENGTH = 520.0
 BLOB_COUNTING_THRESHOLD = 0
 RANDOM_SEED = 42
@@ -554,7 +553,7 @@ def blob_tracking_gibbs_dino(key, genmatter_state):
     def update_blob_velocities(i, carry):
         key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        genmatter_state = gibbs_blob_vel_means_ablation(gibbs_key, genmatter_state)
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
         return key, genmatter_state
 
     def update_blob_velocity_covariances(i, carry):
@@ -566,7 +565,7 @@ def blob_tracking_gibbs_dino(key, genmatter_state):
     def update_blob_means(i, carry):
         key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        genmatter_state = gibbs_blob_means_ablation(gibbs_key, genmatter_state)
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
         return key, genmatter_state
 
     def update_blob_features_dino(i, carry):
@@ -575,8 +574,19 @@ def blob_tracking_gibbs_dino(key, genmatter_state):
         genmatter_state = gibbs_blob_features_dino(gibbs_key, genmatter_state)
         return key, genmatter_state
 
-    # Ablation: hyperblob Gibbs (means/covs/rot/trans) omitted — hyperblobs stay fixed during tracking.
+    def hyperblob_update_loop(i, carry):
+        key, genmatter_state = carry
+        key, gibbs_key = jax.random.split(key)
+        genmatter_state = gibbs_hyperblob_means(gibbs_key, genmatter_state)
+        key, gibbs_key = jax.random.split(key)
+        genmatter_state = gibbs_hyperblob_covs(gibbs_key, genmatter_state)
+        key, gibbs_key = jax.random.split(key)
+        genmatter_state = gibbs_hyperblob_rot(gibbs_key, genmatter_state)
+        key, gibbs_key = jax.random.split(key)
+        genmatter_state = gibbs_hyperblob_trans(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_position_only, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_means, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
@@ -584,6 +594,7 @@ def blob_tracking_gibbs_dino(key, genmatter_state):
     key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocities, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocity_covariances, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
 
     return genmatter_state
 
@@ -631,11 +642,11 @@ def init_gibbs_sweep_dino(key, genmatter_state, num_sweeps=30):
         key, gibbs_key = jax.random.split(key)
         genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        genmatter_state = gibbs_blob_means_ablation(gibbs_key, genmatter_state)
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
         genmatter_state = gibbs_blob_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        genmatter_state = gibbs_blob_vel_means_ablation(gibbs_key, genmatter_state)
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
         genmatter_state = gibbs_blob_vel_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
@@ -934,6 +945,12 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             subsampled_indices=subsampled_indices
         )
 
+        # Inflate k-means hyperblob covariances (weak cluster-level coupling in the generative init)
+        from genjax import ChoiceMapBuilder as C
+        num_hyperblobs_actual = kmeans_chm['hyperblobs', 'hyperblob_covs'].shape[0]
+        huge_hyperblob_covs = jnp.tile(1e6 * jnp.eye(3)[None, :, :], (num_hyperblobs_actual, 1, 1))
+        kmeans_chm = kmeans_chm | C['hyperblobs', 'hyperblob_covs'].set(huge_hyperblob_covs)
+
         # Create hyperparameters (empirical medians from k-means; same scale as non-ablation subsampling)
         num_datapoints = kmeans_chm['datapoints', 'datapoint_positions'].shape[0]
         num_blobs = kmeans_chm['blobs', 'hyperblob_assignments'].shape[0]
@@ -942,7 +959,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         empirical_mu_H = jnp.median(kmeans_chm['datapoints', 'datapoint_positions'], axis=0)
         empirical_sigma_H = (10 * 0.5) ** 2
         empirical_Psi_B = jnp.median(kmeans_chm['blobs', 'blob_covs'][roi_blob_indices], axis=0)
-        empirical_Psi_H = jnp.median(kmeans_chm['hyperblobs', 'hyperblob_covs'][roi_hyperblob_indices], axis=0)
+        empirical_Psi_H = 1e6 * jnp.eye(3)
         empirical_Psi_V = jnp.median(kmeans_chm['blobs', 'blob_vel_covs'][roi_blob_indices], axis=0)
         mean_blobs_per_roi_hyperblob = jnp.sum(
             jnp.isin(kmeans_chm['blobs', 'hyperblob_assignments'], roi_hyperblob_indices)
@@ -1218,9 +1235,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(_davis_dir))
     import davis_run_cli
 
-    _parser = argparse.ArgumentParser(
-        description="DAVIS DINO ablation: K=9 hyperblobs, empirical Psi_H, frozen hyperblob Gibbs (init + tracking), zero-mean blob mean/vel priors"
-    )
+    _parser = argparse.ArgumentParser(description="DAVIS DINO ablation")
     davis_run_cli.add_use_sam_args(_parser)
     davis_run_cli.add_save_3wide_video_args(_parser)
     _args = _parser.parse_args()
@@ -1232,8 +1247,7 @@ if __name__ == "__main__":
     all_accuracies = {}
 
     print(f"{'='*80}")
-    print(f"DINO ablation (frozen hyperblobs, zero-mean blob priors) - Processing {len(VIDEO_NAMES)} videos")
-    print(f"  Hyperblobs: {NUM_HYPERBLOBS_ORIGINAL} (fixed; no hyperblob Gibbs updates)")
+    print(f"DINO ablation - Processing {len(VIDEO_NAMES)} videos")
     print(f"  SAM frame-0 init: {USE_SAM_FRAME0}")
     print(f"  Save 3-wide videos: {SAVE_3WIDE_VIDEO}")
     print(f"  Output directory: {EXPERIMENT_SAVE_DIR}")

@@ -98,15 +98,6 @@ uv run python run_experiments.py rdk-preprocess
 
 ## How to run experiments
 
-### DAVIS ablations (1–4)
-
-| Ablation | Ψ_H | Hyperblob Gibbs (tracking) | Main idea |
-|----------|-----|------------------------------|-----------|
-| **1** | Empirical (median k-means hyperblob cov, ROI) | Off | K=9; frozen hyperblobs + zero-mean blob mean/vel priors (`results/davis_ablation/`) |
-| **2** | 1e⁶·I | On | Large-Ψ_H recipe: inflated k-means hyperblob covs; full hyperblob Gibbs each frame (`results/davis_ablation_2/`) |
-| **3** | 1e⁶·I | Off | Same as **2**, but hyperblobs fixed after init (no hyperblob Gibbs while tracking) (`results/davis_ablation_3/`) |
-| **4** | Empirical (as **1**) | Off | Same as **3**, but Ψ_H from k-means like **1** instead of 1e⁶·I (`results/davis_ablation_4/`) |
-
 ```bash
 # Gestalt (after Gestalt wget under [Data](#data))
 uv run python run_experiments.py gestalt
@@ -117,12 +108,6 @@ uv run python run_experiments.py davis-tracking-sam
 uv run python run_experiments.py davis-tracking-no-sam
 uv run python run_experiments.py davis-ablation-sam
 uv run python run_experiments.py davis-ablation-no-sam
-uv run python run_experiments.py davis-ablation-2-sam
-uv run python run_experiments.py davis-ablation-2-no-sam
-uv run python run_experiments.py davis-ablation-3-sam
-uv run python run_experiments.py davis-ablation-3-no-sam
-uv run python run_experiments.py davis-ablation-4-sam
-uv run python run_experiments.py davis-ablation-4-no-sam
 uv run python run_experiments.py davis-subsampling-sam
 uv run python run_experiments.py davis-subsampling-no-sam
 

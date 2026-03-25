@@ -20,18 +20,6 @@ _KIND_TO_PAIR = {
         config.DAVIS_ABLATION_OUTPUT_DIR_SAM,
         config.DAVIS_ABLATION_OUTPUT_DIR_NO_SAM,
     ),
-    "ablation_2": (
-        config.DAVIS_ABLATION_2_OUTPUT_DIR_SAM,
-        config.DAVIS_ABLATION_2_OUTPUT_DIR_NO_SAM,
-    ),
-    "ablation_3": (
-        config.DAVIS_ABLATION_3_OUTPUT_DIR_SAM,
-        config.DAVIS_ABLATION_3_OUTPUT_DIR_NO_SAM,
-    ),
-    "ablation_4": (
-        config.DAVIS_ABLATION_4_OUTPUT_DIR_SAM,
-        config.DAVIS_ABLATION_4_OUTPUT_DIR_NO_SAM,
-    ),
 }
 
 

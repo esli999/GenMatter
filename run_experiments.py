@@ -55,42 +55,6 @@ COMMANDS = {
         "experiments/davis/run_davis_ablation.py",
         ["--use-sam"],
     ),
-    "davis-ablation-2-sam": (
-        "experiments/davis/run_davis_ablation_2.py",
-        ["--use-sam"],
-    ),
-    "davis-ablation-2-no-sam": (
-        "experiments/davis/run_davis_ablation_2.py",
-        ["--no-use-sam"],
-    ),
-    "davis-ablation-2": (
-        "experiments/davis/run_davis_ablation_2.py",
-        ["--use-sam"],
-    ),
-    "davis-ablation-3-sam": (
-        "experiments/davis/run_davis_ablation_3.py",
-        ["--use-sam"],
-    ),
-    "davis-ablation-3-no-sam": (
-        "experiments/davis/run_davis_ablation_3.py",
-        ["--no-use-sam"],
-    ),
-    "davis-ablation-3": (
-        "experiments/davis/run_davis_ablation_3.py",
-        ["--use-sam"],
-    ),
-    "davis-ablation-4-sam": (
-        "experiments/davis/run_davis_ablation_4.py",
-        ["--use-sam"],
-    ),
-    "davis-ablation-4-no-sam": (
-        "experiments/davis/run_davis_ablation_4.py",
-        ["--no-use-sam"],
-    ),
-    "davis-ablation-4": (
-        "experiments/davis/run_davis_ablation_4.py",
-        ["--use-sam"],
-    ),
     "cotracker": "experiments/baselines/run_cotracker.py",
     "psychophysics-benchmark": (
         "experiments/psychophysics/run_psychophysics_benchmark.py",
