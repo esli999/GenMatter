@@ -169,11 +169,11 @@ GESTALT_OUTPUT_DIR = RESULTS_DIR / "gestalt"
 GESTALT_DEPTH_ABLATION_OUTPUT_DIR = RESULTS_DIR / "gestalt_depth_ablation"
 
 # DAVIS: separate folders for SAM vs GT (TAP-Vid) frame-0 initialization.
-DAVIS_TRACKING_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_tracking"
+DAVIS_TRACKING_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_tracking_sam"
 DAVIS_TRACKING_OUTPUT_DIR_GT_INIT = RESULTS_DIR / "davis_tracking_gt_init"
-DAVIS_SUBSAMPLING_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_subsampling"
+DAVIS_SUBSAMPLING_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_subsampling_sam"
 DAVIS_SUBSAMPLING_OUTPUT_DIR_GT_INIT = RESULTS_DIR / "davis_subsampling_gt_init"
-DAVIS_ABLATION_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_ablation"
+DAVIS_ABLATION_OUTPUT_DIR_SAM = RESULTS_DIR / "davis_ablation_sam"
 DAVIS_ABLATION_OUTPUT_DIR_GT_INIT = RESULTS_DIR / "davis_ablation_gt_init"
 
 # Legacy names — SAM runs (matches historical ``results/davis_*`` layout).
