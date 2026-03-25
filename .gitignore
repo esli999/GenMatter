@@ -12,6 +12,9 @@ external/video-depth-anything/
 # C extensions
 *.so
 
+# project specific
+nohup.out
+
 # Distribution / packaging
 .Python
 build/

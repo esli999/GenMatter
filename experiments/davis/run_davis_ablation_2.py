@@ -70,7 +70,8 @@ EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_2_OUTPUT_DIR)
 # Model hyperparameters
 NUM_BLOBS = 500
 # Ablation-2 (legacy): K=1 hyperblob, large Psi_H, inflated k-means hyperblob covs; full hyperblob Gibbs during tracking.
-NUM_HYPERBLOBS_ORIGINAL = 1
+NUM_HYPERBLOBS_ORIGINAL = 9
+# NUM_HYPERBLOBS_ORIGINAL = 1
 FOCAL_LENGTH = 520.0
 BLOB_COUNTING_THRESHOLD = 0
 RANDOM_SEED = 42
