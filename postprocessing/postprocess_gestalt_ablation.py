@@ -22,6 +22,12 @@ from scipy.ndimage import zoom
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config
 
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
+
 GESTALT_SCENES = list(config.GESTALT_SCENES)
 GESTALT_TEXTURES = list(config.GESTALT_TEXTURES)
 NUM_FRAMES = 6
@@ -248,10 +254,12 @@ def _term_styles() -> dict[str, str]:
     }
 
 
-def _fmt_pm(mean: float | None, std: float | None) -> str:
-    if mean is None or std is None:
+def _fmt_ci(
+    mean: float | None, lo: float | None, hi: float | None
+) -> str:
+    if mean is None or lo is None or hi is None:
         return "N/A"
-    return f"{mean:.4f} ± {std:.4f}"
+    return f"{mean:.4f} [{lo:.4f}, {hi:.4f}]"
 
 
 # ---------------------------------------------------------------------------
@@ -330,14 +338,21 @@ def run_gestalt_ablation_postprocess() -> bool:
 
         bl_valid = [a for a in baseline_accs if a is not None]
         ab_valid = [a for a in ablation_accs if a is not None]
+        bl_lo = bl_hi = ab_lo = ab_hi = None
+        if bl_valid:
+            _, bl_lo, bl_hi = bootstrap_mean_ci_95(bl_valid)
+        if ab_valid:
+            _, ab_lo, ab_hi = bootstrap_mean_ci_95(ab_valid)
 
         all_results.append({
             "scene": scene,
             "texture": texture,
             "baseline_mean_acc": float(np.mean(bl_valid)) if bl_valid else None,
-            "baseline_std_acc": float(np.std(bl_valid)) if bl_valid else None,
+            "baseline_ci95_low": bl_lo,
+            "baseline_ci95_high": bl_hi,
             "ablation_mean_acc": float(np.mean(ab_valid)) if ab_valid else None,
-            "ablation_std_acc": float(np.std(ab_valid)) if ab_valid else None,
+            "ablation_ci95_low": ab_lo,
+            "ablation_ci95_high": ab_hi,
             "baseline_metrics": _average_metrics(baseline_metrics_frames),
             "ablation_metrics": _average_metrics(ablation_metrics_frames),
         })
@@ -348,15 +363,27 @@ def run_gestalt_ablation_postprocess() -> bool:
     bl_all = [r["baseline_mean_acc"] for r in all_results if r["baseline_mean_acc"] is not None]
     ab_all = [r["ablation_mean_acc"] for r in all_results if r["ablation_mean_acc"] is not None]
 
+    def _acc_ci_block(vals: list[float]) -> dict | None:
+        if not vals:
+            return None
+        m, lo, hi = bootstrap_mean_ci_95(vals)
+        return {
+            "mean": m,
+            "ci95_low": lo,
+            "ci95_high": hi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+        }
+
     summary: dict = {
         "baseline": {
             "n": len(bl_all),
-            "accuracy": {"mean": float(np.mean(bl_all)), "std": float(np.std(bl_all))} if bl_all else None,
+            "accuracy": _acc_ci_block(bl_all),
             "metrics": _metrics_summary(all_results, "baseline_metrics"),
         },
         "ablation": {
             "n": len(ab_all),
-            "accuracy": {"mean": float(np.mean(ab_all)), "std": float(np.std(ab_all))} if ab_all else None,
+            "accuracy": _acc_ci_block(ab_all),
             "metrics": _metrics_summary(all_results, "ablation_metrics"),
         },
     }
@@ -369,11 +396,15 @@ def run_gestalt_ablation_postprocess() -> bool:
 
     if paired_bl and paired_ab:
         diff = np.array(paired_bl) - np.array(paired_ab)
+        md, dlo, dhi = bootstrap_mean_ci_95(diff)
         t_stat, p_value = stats.ttest_rel(paired_bl, paired_ab)
         summary["paired_comparison"] = {
             "n": len(paired_bl),
-            "mean_diff": float(np.mean(diff)),
-            "std_diff": float(np.std(diff)),
+            "mean_diff": md,
+            "diff_ci95_low": dlo,
+            "diff_ci95_high": dhi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
             "baseline_wins": int(np.sum(diff > 0)),
             "ablation_wins": int(np.sum(diff < 0)),
             "t_stat": float(t_stat),
@@ -503,7 +534,14 @@ def _metrics_summary(all_results: list[dict], key: str) -> dict | None:
     out = {}
     for mk in metrics_list[0]:
         vals = [m[mk] for m in metrics_list]
-        out[mk] = {"mean": float(np.mean(vals)), "std": float(np.std(vals))}
+        m, lo, hi = bootstrap_mean_ci_95(vals)
+        out[mk] = {
+            "mean": m,
+            "ci95_low": lo,
+            "ci95_high": hi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+        }
     return out
 
 
@@ -549,8 +587,12 @@ def _print_summary(summary: dict) -> None:
         if is_best and jm:
             hdr = f"{t['bold']}{t['green']}{hdr}{t['reset']}"
         print(f"\n{hdr}")
-        acc_s = _fmt_pm(acc["mean"], acc["std"])
-        jac_s = _fmt_pm(jm.get("mean"), jm.get("std")) if jm else "N/A"
+        acc_s = _fmt_ci(acc["mean"], acc.get("ci95_low"), acc.get("ci95_high"))
+        jac_s = (
+            _fmt_ci(jm.get("mean"), jm.get("ci95_low"), jm.get("ci95_high"))
+            if jm
+            else "N/A"
+        )
         if is_best and jm:
             print(f"  Accuracy: {t['bold']}{t['green']}{acc_s}{t['reset']}")
             print(f"  Jaccard:  {t['bold']}{t['green']}{jac_s}{t['reset']}")
@@ -564,7 +606,7 @@ def _print_summary(summary: dict) -> None:
         print(f"{t['yellow']}{t['bold']}Paired comparison (accuracy){t['reset']}")
         print(t["dim"] + sep + t["reset"])
         print(
-            f"  Δmean={pc['mean_diff']:+.4f} ± {pc['std_diff']:.4f}  ·  "
+            f"  Δmean={pc['mean_diff']:+.4f} [{pc['diff_ci95_low']:+.4f}, {pc['diff_ci95_high']:+.4f}]  ·  "
             f"wins: baseline {pc['baseline_wins']} / ablation {pc['ablation_wins']}  ·  "
             f"t={pc['t_stat']:.4f}, p={pc['p_value']:.6f}"
         )

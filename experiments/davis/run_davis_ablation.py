@@ -37,6 +37,11 @@ from genmatter.inference import *
 from genmatter.dataloader import *
 from genmatter.utils import *
 from genmatter.evaluation import *
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
 
 import genjax
 from genjax import Const, gen, Pytree
@@ -53,6 +58,7 @@ VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 NUM_INIT_PARTICLES_ON_MASK = None
 USE_SAM_FRAME0 = True
 SAVE_3WIDE_VIDEO = False  # overridden by davis_run_cli when run as __main__
+SKIP_COMPLETED = False  # overwritten by davis_run_cli.configure_experiment_module
 
 # Paths
 DAVIS_3D_MOTION_PATH = str(config.DAVIS_3D_MOTION_PATH)
@@ -1238,6 +1244,7 @@ if __name__ == "__main__":
     _parser = argparse.ArgumentParser(description="DAVIS DINO ablation")
     davis_run_cli.add_frame0_init_args(_parser)
     davis_run_cli.add_save_3wide_video_args(_parser)
+    davis_run_cli.add_skip_completed_args(_parser)
     _args = _parser.parse_args()
     davis_run_cli.configure_experiment_module(sys.modules[__name__], _args, "ablation")
 
@@ -1255,6 +1262,8 @@ if __name__ == "__main__":
         print(f"FPS measurement: ENABLED")
     else:
         print(f"FPS measurement: DISABLED")
+    if SKIP_COMPLETED:
+        print(f"  Skip completed: YES (per subsample_*/json_results/*_results.json)")
     print(f"{'='*80}\n")
 
     subsampling_percentages = [0.78125]
@@ -1266,6 +1275,26 @@ if __name__ == "__main__":
             run_dir_name = f"subsample_{str(percentage).replace('.', '_')}"
             run_save_dir = os.path.join(EXPERIMENT_SAVE_DIR, run_dir_name)
             os.makedirs(run_save_dir, exist_ok=True)
+
+            json_results_dir = os.path.join(run_save_dir, "json_results")
+            per_run_json_path = os.path.join(json_results_dir, f"{video_name}_results.json")
+            if SKIP_COMPLETED and os.path.isfile(per_run_json_path):
+                with open(per_run_json_path, "r") as f:
+                    vid_metrics = json.load(f)
+                all_accuracies[video_name] = vid_metrics
+                json_path = os.path.join(run_save_dir, "all_videos_experiment_results.json")
+                if os.path.exists(json_path):
+                    with open(json_path, "r") as f:
+                        existing_results = json.load(f)
+                    existing_results.update({video_name: vid_metrics})
+                    all_accuracies_to_save = existing_results
+                else:
+                    all_accuracies_to_save = {video_name: vid_metrics}
+                with open(json_path, "w") as f:
+                    json.dump(all_accuracies_to_save, f, indent=2)
+                print(f"[skip-completed] {video_name} ({percentage}% grid) -> {per_run_json_path}")
+                cleanup_between_runs()
+                continue
 
             result = process_video(video_name, subsampling_percentage=percentage, subsampled_indices=None, run_save_dir=run_save_dir)
 
@@ -1383,17 +1412,25 @@ if __name__ == "__main__":
     fps_values = [m.get('fps') for m in valid_results.values() if m.get('fps') is not None]
 
     print(f"AGGREGATE STATISTICS ACROSS ALL VIDEOS:")
+    print(
+        f"  (95% CIs: percentile bootstrap on video means, B={BOOTSTRAP_N_SAMPLES}, seed={BOOTSTRAP_RANDOM_SEED})"
+    )
 
     print(f"\n  MATTER-WEIGHTED FIXED (primary DAVIS metric):")
-    print(f"    Recall:                  {np.mean(particle_count_matter_fixed_recall):.3f} ± {np.std(particle_count_matter_fixed_recall):.3f}")
-    print(f"    Precision:               {np.mean(particle_count_matter_fixed_precision):.3f} ± {np.std(particle_count_matter_fixed_precision):.3f}")
-    print(f"    Jaccard:                 {np.mean(particle_count_matter_fixed_jaccard):.3f} ± {np.std(particle_count_matter_fixed_jaccard):.3f}")
-    print(f"    Accuracy:                {np.mean(particle_count_matter_fixed_accuracy):.3f} ± {np.std(particle_count_matter_fixed_accuracy):.3f}")
+    for label, arr in [
+        ("Recall", particle_count_matter_fixed_recall),
+        ("Precision", particle_count_matter_fixed_precision),
+        ("Jaccard", particle_count_matter_fixed_jaccard),
+        ("Accuracy", particle_count_matter_fixed_accuracy),
+    ]:
+        m, lo, hi = bootstrap_mean_ci_95(arr)
+        print(f"    {label:18s} {m:.3f} [{lo:.3f}, {hi:.3f}]")
 
     # Print FPS statistics if available
     if fps_values:
         print(f"\n  5. PERFORMANCE METRICS:")
-        print(f"    FPS:                     {np.mean(fps_values):.2f} ± {np.std(fps_values):.2f} frames/second")
+        fm, flo, fhi = bootstrap_mean_ci_95(fps_values)
+        print(f"    FPS:                     {fm:.2f} [{flo:.2f}, {fhi:.2f}] frames/second")
         print(f"    Videos with FPS data:    {len(fps_values)}/{len(valid_results)}")
     else:
         print(f"\n  5. PERFORMANCE METRICS:")

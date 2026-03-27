@@ -22,6 +22,12 @@ sys.path.insert(0, str(_REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
 
+from genmatter.bootstrap_stats import (  # noqa: E402
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
+
 from postprocess_gestalt_ablation import run_gestalt_ablation_postprocess  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -338,7 +344,14 @@ def _metrics_summary(all_results: list[dict], key: str) -> dict | None:
     out = {}
     for k in ("precision", "recall", "f1", "jaccard", "fpr", "fnr"):
         vals = [m[k] for m in metrics_list]
-        out[k] = {"mean": float(np.mean(vals)), "std": float(np.std(vals))}
+        m, lo, hi = bootstrap_mean_ci_95(vals)
+        out[k] = {
+            "mean": m,
+            "ci95_low": lo,
+            "ci95_high": hi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+        }
     return out
 
 
@@ -496,12 +509,26 @@ def main() -> None:
             ("flowsam", flowsam_all, "flowsam_metrics"),
             ("genmatter", genmatter_all, "genmatter_metrics"),
         ]:
+            if vals:
+                am, alo, ahi = bootstrap_mean_ci_95(vals)
+                acc = {
+                    "mean": am,
+                    "ci95_low": alo,
+                    "ci95_high": ahi,
+                    "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+                    "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+                }
+            else:
+                acc = {
+                    "mean": None,
+                    "ci95_low": None,
+                    "ci95_high": None,
+                    "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+                    "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+                }
             summary[name] = {
                 "n": len(vals),
-                "accuracy": {
-                    "mean": float(np.mean(vals)) if vals else None,
-                    "std": float(np.std(vals)) if vals else None,
-                },
+                "accuracy": acc,
                 "metrics": _metrics_summary(all_results, mkey),
             }
 
@@ -519,11 +546,15 @@ def main() -> None:
 
             def _comparison(a, b, name_a, name_b):
                 diff = np.array(a) - np.array(b)
+                md, dlo, dhi = bootstrap_mean_ci_95(diff)
                 t, p = stats.ttest_rel(a, b)
                 return {
                     "n": len(a),
-                    "mean_diff": float(np.mean(diff)),
-                    "std_diff": float(np.std(diff)),
+                    "mean_diff": md,
+                    "diff_ci95_low": dlo,
+                    "diff_ci95_high": dhi,
+                    "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+                    "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
                     f"{name_a}_wins": int(np.sum(diff > 0)),
                     f"{name_b}_wins": int(np.sum(diff < 0)),
                     "t_stat": float(t),

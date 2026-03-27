@@ -46,6 +46,18 @@ def add_save_3wide_video_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_skip_completed_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--skip-completed",
+        action="store_true",
+        help=(
+            "Skip work when json_results/{video}_results.json already exists "
+            "(resume after interrupt; tracking: one JSON per video under json_results/; "
+            "subsampling & ablation: per subsample_* subfolder)."
+        ),
+    )
+
+
 def configure_experiment_module(
     module: ModuleType, args: argparse.Namespace, kind: str
 ) -> None:
@@ -56,3 +68,4 @@ def configure_experiment_module(
     module.USE_SAM_FRAME0 = use_sam
     module.EXPERIMENT_SAVE_DIR = str(sam_dir if use_sam else gt_init_dir)
     module.SAVE_3WIDE_VIDEO = bool(getattr(args, "save_3wide_video", False))
+    module.SKIP_COMPLETED = bool(getattr(args, "skip_completed", False))

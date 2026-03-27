@@ -23,6 +23,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config  # noqa: E402
 
+from genmatter.bootstrap_stats import (  # noqa: E402
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -96,6 +102,23 @@ def _safe_mean(values: list[float]) -> float:
 
 def _safe_std(values: list[float]) -> float:
     return float(np.std(values)) if values else float("nan")
+
+
+def _finite_values(values: list[float]) -> list[float]:
+    return [float(x) for x in values if not np.isnan(x)]
+
+
+def _bootstrap_mean_ci_meta(values: list[float]) -> dict[str, float]:
+    """Mean and 95% percentile-bootstrap CI for the mean across *values*."""
+    vals = _finite_values(values)
+    m, lo, hi = bootstrap_mean_ci_95(vals)
+    return {
+        "mean": m,
+        "ci95_low": lo,
+        "ci95_high": hi,
+        "bootstrap_n": int(BOOTSTRAP_N_SAMPLES),
+        "bootstrap_seed": int(BOOTSTRAP_RANDOM_SEED),
+    }
 
 
 def compute_particle_f1(
@@ -524,14 +547,20 @@ def build_subsampling_tradeoff(
             if not np.isnan(m.get("fps", float("nan")))
         ]
 
+        j_meta = _bootstrap_mean_ci_meta(jaccards)
+        f_meta = _bootstrap_mean_ci_meta(fps_vals) if fps_vals else {}
         rows.append(
             {
                 "subsample_pct": pct,
                 "n_videos": len(per_video),
-                "jaccard_mean": _safe_mean(jaccards),
-                "jaccard_std": _safe_std(jaccards),
-                "fps_mean": _safe_mean(fps_vals),
-                "fps_std": _safe_std(fps_vals),
+                "jaccard_mean": j_meta["mean"],
+                "jaccard_ci95_low": j_meta["ci95_low"],
+                "jaccard_ci95_high": j_meta["ci95_high"],
+                "fps_mean": f_meta.get("mean", float("nan")),
+                "fps_ci95_low": f_meta.get("ci95_low", float("nan")),
+                "fps_ci95_high": f_meta.get("ci95_high", float("nan")),
+                "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+                "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
                 "per_video": {
                     video: {
                         "matter_jaccard_fixed": m["matter_weighted_jaccard_fixed"],
@@ -676,7 +705,7 @@ def print_davis_analysis_report(
     meta_ab_gt_init: dict[str, Any],
     ct_results: dict[str, dict[str, Any]],
 ) -> None:
-    """Pretty-print video-by-video (SAM vs GT init) and aggregate mean±std tables."""
+    """Pretty-print video-by-video (SAM vs GT init) and aggregate mean + 95% bootstrap CIs."""
     t = _term_styles()
     sep = "=" * 100
 
@@ -785,7 +814,7 @@ def print_davis_analysis_report(
         col_no,
     )
 
-    # --- Aggregate: all models, Jaccard and FPS as mean ± std ---
+    # --- Aggregate: all models, Jaccard and FPS as mean + 95% bootstrap CI ---
     print(f"\n{sep}")
     print(
         f"{t['cyan']}{t['bold']}Aggregate results (mean over all videos){t['reset']}"
@@ -842,12 +871,12 @@ def print_davis_analysis_report(
     w_model = max(28, max((len(r[0]) for r in agg_rows), default=28))
     w_init = 6
     w_n = 7
-    w_j = 24
-    w_f = 24
+    w_j = 34
+    w_f = 28
 
     hdr = (
         f"{t['magenta']}{'Model':<{w_model}} {'Init':<{w_init}} {'#Vids':>{w_n}} "
-        f"{'Jaccard (mean ± std)':>{w_j}} {'FPS (mean ± std)':>{w_f}}{t['reset']}"
+        f"{'Jaccard mean [95% CI]':>{w_j}} {'FPS mean [95% CI]':>{w_f}}{t['reset']}"
     )
     print(hdr)
     print(
@@ -860,13 +889,17 @@ def print_davis_analysis_report(
     for model, init, js, fs in agg_rows:
         jv = [x for x in js if not np.isnan(x)]
         fv = [x for x in fs if not np.isnan(x)]
-        jm = _safe_mean(jv)
-        jsd = _safe_std(jv)
-        fm = _safe_mean(fv)
-        fsd = _safe_std(fv)
+        if jv:
+            jm, jlo, jhi = bootstrap_mean_ci_95(jv)
+            j_str = f"{jm:.4f} [{jlo:.4f}, {jhi:.4f}]"
+        else:
+            jm, j_str = float("nan"), "N/A"
+        if fv:
+            fm, flo, fhi = bootstrap_mean_ci_95(fv)
+            f_str = f"{fm:.2f} [{flo:.2f}, {fhi:.2f}]"
+        else:
+            f_str = "N/A"
         n_str = str(len(jv)) if jv else "—"
-        j_str = f"{jm:.4f} ± {jsd:.4f}" if jv else "N/A"
-        f_str = f"{fm:.2f} ± {fsd:.2f}" if fv else "N/A"
         table_rows.append((model, init, n_str, j_str, f_str, jm))
 
     best_mean = max(
@@ -1043,82 +1076,44 @@ def main() -> None:
     comparison_out = {
         "per_video": comparison,
         "summary": {
-            "cotracker": {
-                "jaccard_mean": _safe_mean(
-                    [
-                        r["cotracker_jaccard"]
-                        for r in comparison
-                        if not np.isnan(r.get("cotracker_jaccard", float("nan")))
-                    ]
-                ),
-                "jaccard_std": _safe_std(
-                    [
-                        r["cotracker_jaccard"]
-                        for r in comparison
-                        if not np.isnan(r.get("cotracker_jaccard", float("nan")))
-                    ]
-                ),
-            },
-            "dino_tracking": {
-                "matter_jaccard_fixed_mean": _safe_mean(
-                    [
-                        r["dino_matter_jaccard_fixed"]
-                        for r in comparison
-                        if not np.isnan(
-                            r.get("dino_matter_jaccard_fixed", float("nan"))
-                        )
-                    ]
-                ),
-                "matter_jaccard_fixed_std": _safe_std(
-                    [
-                        r["dino_matter_jaccard_fixed"]
-                        for r in comparison
-                        if not np.isnan(
-                            r.get("dino_matter_jaccard_fixed", float("nan"))
-                        )
-                    ]
-                ),
-            },
-            "dino_ablation_sam": {
-                "matter_jaccard_fixed_mean": _safe_mean(
-                    [
-                        r["ablation_sam_matter_jaccard_fixed"]
-                        for r in comparison
-                        if not np.isnan(
-                            r.get("ablation_sam_matter_jaccard_fixed", float("nan"))
-                        )
-                    ]
-                ),
-                "matter_jaccard_fixed_std": _safe_std(
-                    [
-                        r["ablation_sam_matter_jaccard_fixed"]
-                        for r in comparison
-                        if not np.isnan(
-                            r.get("ablation_sam_matter_jaccard_fixed", float("nan"))
-                        )
-                    ]
-                ),
-            },
-            "dino_ablation_gt_init": {
-                "matter_jaccard_fixed_mean": _safe_mean(
-                    [
-                        r["ablation_gt_init_matter_jaccard_fixed"]
-                        for r in comparison
-                        if not np.isnan(
-                            r.get("ablation_gt_init_matter_jaccard_fixed", float("nan"))
-                        )
-                    ]
-                ),
-                "matter_jaccard_fixed_std": _safe_std(
-                    [
-                        r["ablation_gt_init_matter_jaccard_fixed"]
-                        for r in comparison
-                        if not np.isnan(
-                            r.get("ablation_gt_init_matter_jaccard_fixed", float("nan"))
-                        )
-                    ]
-                ),
-            },
+            "cotracker": _bootstrap_mean_ci_meta(
+                [
+                    r["cotracker_jaccard"]
+                    for r in comparison
+                    if not np.isnan(r.get("cotracker_jaccard", float("nan")))
+                ]
+            )
+            | {"metric": "cotracker_jaccard"},
+            "dino_tracking": _bootstrap_mean_ci_meta(
+                [
+                    r["dino_matter_jaccard_fixed"]
+                    for r in comparison
+                    if not np.isnan(
+                        r.get("dino_matter_jaccard_fixed", float("nan"))
+                    )
+                ]
+            )
+            | {"metric": "dino_matter_jaccard_fixed"},
+            "dino_ablation_sam": _bootstrap_mean_ci_meta(
+                [
+                    r["ablation_sam_matter_jaccard_fixed"]
+                    for r in comparison
+                    if not np.isnan(
+                        r.get("ablation_sam_matter_jaccard_fixed", float("nan"))
+                    )
+                ]
+            )
+            | {"metric": "ablation_sam_matter_jaccard_fixed"},
+            "dino_ablation_gt_init": _bootstrap_mean_ci_meta(
+                [
+                    r["ablation_gt_init_matter_jaccard_fixed"]
+                    for r in comparison
+                    if not np.isnan(
+                        r.get("ablation_gt_init_matter_jaccard_fixed", float("nan"))
+                    )
+                ]
+            )
+            | {"metric": "ablation_gt_init_matter_jaccard_fixed"},
         },
         "ablation_loading": {
             "sam": meta_ab_sam,

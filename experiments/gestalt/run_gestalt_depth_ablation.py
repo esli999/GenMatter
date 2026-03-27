@@ -29,6 +29,11 @@ from experiments.gestalt.algorithm import (
 )
 
 from genmatter.utils import make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
 
 from genmatter.datatypes import *
 from genmatter.model_3d import *
@@ -867,15 +872,22 @@ def run_experiment_for_scene_texture(scene, texture):
                 run_uncertainty_ratios.append(np.mean(frame_uncertainty_ratios))
 
         if len(run_overall_accuracies) > 0:
-            mean_overall_accuracy = np.mean(run_overall_accuracies)
-            std_overall_accuracy = np.std(run_overall_accuracies)
-            print(f"Mean Overall Accuracy (across {len(run_overall_accuracies)} runs): {mean_overall_accuracy:.3f} ± {std_overall_accuracy:.3f}")
+            mean_overall_accuracy, oa_lo, oa_hi = bootstrap_mean_ci_95(run_overall_accuracies)
+            print(
+                f"Mean Overall Accuracy (across {len(run_overall_accuracies)} runs): "
+                f"{mean_overall_accuracy:.3f} [{oa_lo:.3f}, {oa_hi:.3f}] "
+                f"(95% bootstrap CI, B={BOOTSTRAP_N_SAMPLES}, seed={BOOTSTRAP_RANDOM_SEED})"
+            )
             print(f"Total frames: {total_frames} (1 initial + {num_tracking_frames} tracked)")
 
             # Print uncertainty statistics
             if len(run_uncertainty_ratios) > 0:
+                ur_m, ur_lo, ur_hi = bootstrap_mean_ci_95(run_uncertainty_ratios)
                 print(f"\nUncertainty Statistics (averaged across frames and runs):")
-                print(f"  Mean uncertainty ratio: {np.mean(run_uncertainty_ratios):.3f} ± {np.std(run_uncertainty_ratios):.3f}")
+                print(
+                    f"  Mean uncertainty ratio: {ur_m:.3f} [{ur_lo:.3f}, {ur_hi:.3f}] "
+                    f"(95% bootstrap CI)"
+                )
 
             # Per-frame aggregation
             all_frame_accuracies = []
@@ -883,20 +895,22 @@ def run_experiment_for_scene_texture(scene, texture):
                 frame_accs = [r['frame_accuracies'][frame_idx] for r in all_run_results
                               if frame_idx < len(r['frame_accuracies']) and r['frame_accuracies'][frame_idx] is not None]
                 if len(frame_accs) > 0:
-                    mean_frame_acc = np.mean(frame_accs)
-                    std_frame_acc = np.std(frame_accs)
+                    mf, flo, fhi = bootstrap_mean_ci_95(frame_accs)
                     all_frame_accuracies.append({
-                        'mean': mean_frame_acc,
-                        'std': std_frame_acc,
+                        'mean': mf,
+                        'ci95_low': flo,
+                        'ci95_high': fhi,
+                        'bootstrap_n': BOOTSTRAP_N_SAMPLES,
+                        'bootstrap_seed': BOOTSTRAP_RANDOM_SEED,
                         'values': frame_accs
                     })
                     frame_label = f"Frame 0 (initial)" if frame_idx == 0 else f"Frame {frame_idx}"
-                    print(f"  {frame_label}: {mean_frame_acc:.3f} ± {std_frame_acc:.3f}")
+                    print(f"  {frame_label}: {mf:.3f} [{flo:.3f}, {fhi:.3f}]")
                 else:
                     all_frame_accuracies.append(None)
         else:
             mean_overall_accuracy = None
-            std_overall_accuracy = None
+            oa_lo, oa_hi = None, None
             all_frame_accuracies = None
             total_frames = 0
             num_tracking_frames = 0
@@ -956,7 +970,10 @@ def run_experiment_for_scene_texture(scene, texture):
             'texture': texture,
             'num_runs': NUM_RUNS,
             'mean_overall_accuracy': mean_overall_accuracy,
-            'std_overall_accuracy': std_overall_accuracy,
+            'overall_accuracy_ci95_low': oa_lo if len(run_overall_accuracies) > 0 else None,
+            'overall_accuracy_ci95_high': oa_hi if len(run_overall_accuracies) > 0 else None,
+            'bootstrap_n': BOOTSTRAP_N_SAMPLES,
+            'bootstrap_seed': BOOTSTRAP_RANDOM_SEED,
             'frame_accuracies_aggregated': all_frame_accuracies,
             'individual_runs': [
                 {
@@ -985,7 +1002,8 @@ def run_experiment_for_scene_texture(scene, texture):
             'scene': scene,
             'texture': texture,
             'mean_overall_accuracy': mean_overall_accuracy,
-            'std_overall_accuracy': std_overall_accuracy,
+            'overall_accuracy_ci95_low': oa_lo if len(run_overall_accuracies) > 0 else None,
+            'overall_accuracy_ci95_high': oa_hi if len(run_overall_accuracies) > 0 else None,
             'success': True
         }
 
