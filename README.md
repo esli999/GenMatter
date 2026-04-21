@@ -108,11 +108,11 @@ uv run python run_experiments.py gestalt-depth-ablation
 # DAVIS — SAM vs GT frame-0 init (pair as you need)
 uv run python run_experiments.py davis-tracking-sam
 uv run python run_experiments.py davis-tracking-gt-init
-uv run python run_experiments.py davis-subsampling-sam
-uv run python run_experiments.py davis-subsampling-gt-init
 uv run python run_experiments.py davis-ablation-sam
 uv run python run_experiments.py davis-ablation-gt-init
 uv run python run_experiments.py cotracker
+uv run python run_experiments.py davis-subsampling-sam
+uv run python run_experiments.py davis-subsampling-gt-init
 
 # RDK / psychophysics
 uv run python run_experiments.py psychophysics-benchmark

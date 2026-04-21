@@ -74,7 +74,7 @@ NUM_HYPERBLOBS_ORIGINAL = 9
 FOCAL_LENGTH = 520.0
 BLOB_COUNTING_THRESHOLD = 0
 RANDOM_SEED = 42
-_DATAPOINT_RETAIN_PCT = 12.5
+_DATAPOINT_RETAIN_PCT = 0.78125
 
 # ============================================================================
 # Model Definition with DINO Features
