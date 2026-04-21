@@ -365,6 +365,93 @@ def gibbs_blob_features_dino(key, genmatter_state):
     new_blob_features = genjax.normal.sample(posterior_key, posterior_mean, posterior_std)
     return genmatter_state.replace({'blobs_state': {'blob_features': new_blob_features}})
 
+
+@jax.jit
+def dense_eval_blob_assignments(key, genmatter_state, dense_positions, dense_vels, dense_features,
+                                disable_outlier_prob=False):
+    """Dense evaluation of blob assignments on the full pixel grid (matches run_davis_subsampling)."""
+    from genjax import ChoiceMapBuilder as C
+
+    posterior_key, _ = jax.random.split(key)
+    batch_size = 975
+
+    hypers = genmatter_state.hypers
+    num_blobs = hypers.n_blobs
+    num_datapoints = dense_positions.shape[0]
+    datapoint_positions = dense_positions
+    datapoint_vels = dense_vels
+    datapoint_features = dense_features
+    blobs_state = genmatter_state.blobs_state
+
+    blob_weights = blobs_state.blob_weights
+    outlier_prob = jnp.where(disable_outlier_prob, 0.0, hypers.outlier_prob)
+    extended_weights = jnp.concatenate([blob_weights, jnp.array([outlier_prob])])
+    normalized_weights = extended_weights / jnp.sum(extended_weights)
+    log_mixture_weights = jnp.log(normalized_weights)
+    sigma_F = hypers.sigma_F
+
+    def compute_local_density(point_idx):
+        chm = (
+            C["datapoint_position"].set(datapoint_positions[point_idx]) |
+            C["datapoint_vel"].set(datapoint_vels[point_idx]) |
+            C["datapoint_feature"].set(datapoint_features[point_idx])
+        )
+        log_liks = jax.vmap(
+            lambda i: blob_datapoint_likelihood_model_dino.assess(chm, (blobs_state[i], sigma_F))[0]
+        )(jnp.arange(num_blobs))
+        v = datapoint_vels[point_idx]
+        speed = jnp.linalg.norm(v)
+        alpha = hypers.outlier_velocity_gamma_shape
+        beta = hypers.outlier_velocity_gamma_rate
+        log_gamma_vel = (
+            (alpha - 1) * jnp.log(speed + 1e-8)
+            - beta * speed
+            - alpha * jnp.log(1. / beta)
+            - jax.lax.lgamma(alpha)
+        )
+        log_gamma_vel = jnp.where(disable_outlier_prob, 0.0, log_gamma_vel)
+        raw_log_liks = jnp.concatenate([log_liks, jnp.array([log_gamma_vel])])
+        return raw_log_liks + log_mixture_weights
+
+    def batch_compute_logprobs(carry, batch_idx):
+        batch_start = batch_idx * batch_size
+        batch_indices = jnp.arange(batch_size) + batch_start
+        batch_logprobs = jax.vmap(compute_local_density)(batch_indices)
+        return carry, batch_logprobs
+
+    num_full_batches = num_datapoints // batch_size
+    _, batched_logprobs = jax.lax.scan(
+        batch_compute_logprobs,
+        None,
+        jnp.arange(num_full_batches)
+    )
+
+    all_logprobs = batched_logprobs.reshape(num_full_batches * batch_size, -1)
+    dense_eval_assignments = genjax.categorical.sample(posterior_key, logits=all_logprobs)
+
+    return dense_eval_assignments
+
+
+@jax.jit
+def dense_eval_blob_weights(key, genmatter_state: GenMatter_State, dense_assignments: jnp.ndarray):
+    posterior_key, _ = jax.random.split(key)
+
+    num_blobs = genmatter_state.hypers.n_blobs
+    prior_beta = genmatter_state.hypers.beta
+    blob_idxs = dense_assignments
+
+    blob_counts = jax.ops.segment_sum(
+        jnp.ones_like(blob_idxs),
+        blob_idxs,
+        num_segments=num_blobs
+    )
+
+    new_betas = prior_beta + blob_counts
+    new_blob_weights = genjax.dirichlet.sample(posterior_key, new_betas)
+
+    return new_blob_weights
+
+
 def gibbs_blob_assignments_dino(key, genmatter_state, position_only=False,
                                 velocity_only=False, disable_outlier_prob=False, feature_only=False):
     """Gibbs update for blob assignments with DINO feature likelihood."""
@@ -974,31 +1061,74 @@ def process_video(video_name):
                 outlier_prob=1e-28
             )
 
-        # Extract results
+        num_datapoints_full = tracked_points_full.shape[1]
+
+        # Extract results — subsampled tracking states live on a subset of pixels; dense-eval each
+        # frame onto the full grid so metrics match run_davis_subsampling at the same retain %.
         tracking_data = []
-        for frame_idx in range(len(tracking_wtrs)):
-            frame = tracking_wtrs[frame_idx]
-            frame_data = {
-                'n_blobs': frame.retval.hypers.n_blobs,
-                'n_hyperblobs': frame.retval.hypers.n_hyperblobs,
-                'n_datapoints': frame.retval.hypers.n_datapoints,
-                'blob_assignments': np.array(frame.retval.datapoints_state.blob_assignments),
-                'datapoint_positions': np.array(frame.retval.datapoints_state.datapoint_positions),
-                'datapoint_vels': np.array(frame.retval.datapoints_state.datapoint_vels),
-                'datapoint_features': np.array(frame.retval.datapoints_state.datapoint_features),
-                'blob_weights': np.array(frame.retval.blobs_state.blob_weights),
-                'blob_means': np.array(frame.retval.blobs_state.blob_means),
-                'blob_covs': np.array(frame.retval.blobs_state.blob_covs),
-                'blob_vel_means': np.array(frame.retval.blobs_state.blob_vel_means),
-                'blob_vel_covs': np.array(frame.retval.blobs_state.blob_vel_covs),
-                'blob_features': np.array(frame.retval.blobs_state.blob_features),
-                'hyperblob_assignments': np.array(frame.retval.blobs_state.hyperblob_assignments),
-                'hyperblob_weights': np.array(frame.retval.hyperblobs_state.hyperblob_weights),
-                'hyperblob_means': np.array(frame.retval.hyperblobs_state.hyperblob_means),
-                'hyperblob_trans_vels': np.array(frame.retval.hyperblobs_state.hyperblob_trans_vels),
-                'hyperblob_rot_vels': np.array(frame.retval.hyperblobs_state.hyperblob_rot_vels),
-            }
-            tracking_data.append(frame_data)
+        if _DATAPOINT_RETAIN_PCT < 100.0:
+            for frame_idx in tqdm(range(len(tracking_wtrs)), desc="Dense evaluating blob assignments"):
+                frame = tracking_wtrs[frame_idx]
+                key, dense_eval_assignments_key = jax.random.split(key)
+                dense_eval_assignments = dense_eval_blob_assignments(
+                    key=dense_eval_assignments_key,
+                    genmatter_state=frame.retval,
+                    dense_positions=tracked_points_full[frame_idx],
+                    dense_vels=tracked_motion_vectors_full[frame_idx],
+                    dense_features=tracked_features_full[frame_idx],
+                    disable_outlier_prob=False,
+                )
+                key, dense_eval_weights_key = jax.random.split(key)
+                dense_eval_weights = dense_eval_blob_weights(
+                    key=dense_eval_weights_key,
+                    genmatter_state=frame.retval,
+                    dense_assignments=dense_eval_assignments,
+                )
+                frame_data = {
+                    'n_blobs': frame.retval.hypers.n_blobs,
+                    'n_hyperblobs': frame.retval.hypers.n_hyperblobs,
+                    'n_datapoints': num_datapoints_full,
+                    'blob_assignments': np.array(dense_eval_assignments),
+                    'datapoint_positions': np.array(tracked_points_full[frame_idx]),
+                    'datapoint_vels': np.array(tracked_motion_vectors_full[frame_idx]),
+                    'datapoint_features': np.array(tracked_features_full[frame_idx]),
+                    'blob_weights': np.array(dense_eval_weights),
+                    'blob_means': np.array(frame.retval.blobs_state.blob_means),
+                    'blob_covs': np.array(frame.retval.blobs_state.blob_covs),
+                    'blob_vel_means': np.array(frame.retval.blobs_state.blob_vel_means),
+                    'blob_vel_covs': np.array(frame.retval.blobs_state.blob_vel_covs),
+                    'blob_features': np.array(frame.retval.blobs_state.blob_features),
+                    'hyperblob_assignments': np.array(frame.retval.blobs_state.hyperblob_assignments),
+                    'hyperblob_weights': np.array(frame.retval.hyperblobs_state.hyperblob_weights),
+                    'hyperblob_means': np.array(frame.retval.hyperblobs_state.hyperblob_means),
+                    'hyperblob_trans_vels': np.array(frame.retval.hyperblobs_state.hyperblob_trans_vels),
+                    'hyperblob_rot_vels': np.array(frame.retval.hyperblobs_state.hyperblob_rot_vels),
+                }
+                tracking_data.append(frame_data)
+        else:
+            for frame_idx in range(len(tracking_wtrs)):
+                frame = tracking_wtrs[frame_idx]
+                frame_data = {
+                    'n_blobs': frame.retval.hypers.n_blobs,
+                    'n_hyperblobs': frame.retval.hypers.n_hyperblobs,
+                    'n_datapoints': frame.retval.hypers.n_datapoints,
+                    'blob_assignments': np.array(frame.retval.datapoints_state.blob_assignments),
+                    'datapoint_positions': np.array(frame.retval.datapoints_state.datapoint_positions),
+                    'datapoint_vels': np.array(frame.retval.datapoints_state.datapoint_vels),
+                    'datapoint_features': np.array(frame.retval.datapoints_state.datapoint_features),
+                    'blob_weights': np.array(frame.retval.blobs_state.blob_weights),
+                    'blob_means': np.array(frame.retval.blobs_state.blob_means),
+                    'blob_covs': np.array(frame.retval.blobs_state.blob_covs),
+                    'blob_vel_means': np.array(frame.retval.blobs_state.blob_vel_means),
+                    'blob_vel_covs': np.array(frame.retval.blobs_state.blob_vel_covs),
+                    'blob_features': np.array(frame.retval.blobs_state.blob_features),
+                    'hyperblob_assignments': np.array(frame.retval.blobs_state.hyperblob_assignments),
+                    'hyperblob_weights': np.array(frame.retval.hyperblobs_state.hyperblob_weights),
+                    'hyperblob_means': np.array(frame.retval.hyperblobs_state.hyperblob_means),
+                    'hyperblob_trans_vels': np.array(frame.retval.hyperblobs_state.hyperblob_trans_vels),
+                    'hyperblob_rot_vels': np.array(frame.retval.hyperblobs_state.hyperblob_rot_vels),
+                }
+                tracking_data.append(frame_data)
 
         # Evaluate
         print("Computing error rates...")
