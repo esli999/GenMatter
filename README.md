@@ -17,26 +17,6 @@ From the repository root:
 uv sync
 ```
 
-## How to run (CLI)
-
-Every experiment and postprocessing step is invoked the same way:
-
-```bash
-uv run python run_experiments.py <command>
-```
-
-`<command>` is one of the keys in `run_experiments.py` (for a full list, run `uv run python run_experiments.py -h`). Common groups:
-
-| Area | Commands | Default output under `results/` (see `config.py` to override) |
-|------|----------|----------------------------------------------------------------|
-| Gestalt | `gestalt`, `gestalt-depth-ablation` | `gestalt/`, `gestalt_depth_ablation/` |
-| DAVIS preprocess | `download-tapvid-davis`, `davis-preprocess`, `davis-extract-dino`, … | Writes under `assets/tapvid_davis_30_videos_processed/` |
-| DAVIS experiments | `davis-tracking-sam`, `davis-tracking-gt-init`, `davis-subsampling-sam`, `davis-subsampling-gt-init`, `davis-ablation-sam`, `davis-ablation-gt-init`, `cotracker` | `davis_tracking/`, `davis_subsampling/`, `davis_ablation/`, `cotracker_baseline/`, and `*_gt_init` variants for TAP-Vid frame-0 init |
-| RDK | `rdk-preprocess`, `psychophysics-benchmark`, `psychophysics-rdk-ablation-fixed`, `psychophysics-rdk-ablation-adaptive` | `psychophysics/` (and assets under `assets/RDK/`) |
-| Postprocessing | `postprocess-gestalt`, `postprocess-davis`, `postprocess-psychophysics` | `postprocessing/` |
-
-**Typical DAVIS order:** put data under `assets/` (S3 download or `download-tapvid-davis` + `davis-preprocess`) → run tracking / subsampling / ablation / cotracker as needed → `postprocess-davis`.
-
 ## Data
 
 The paper has **three** experiments. Put all data for the experiments under **`assets/`** at the repository root (that directory is gitignored).
@@ -116,7 +96,7 @@ uv run python run_experiments.py rdk-preprocess
 
 ---
 
-## Example commands (copy-paste)
+## Running the Experiments
 
 After [data](#data) is in place:
 
@@ -151,6 +131,25 @@ uv run python run_experiments.py postprocess-psychophysics
 Aggregated tables and CSVs: `results/postprocessing/`.
 
 ---
+
+## The `run_experiments` CLI
+
+Every experiment and postprocessing step is invoked the same way:
+
+```bash
+uv run python run_experiments.py <command>
+```
+
+`<command>` is one of the keys in `run_experiments.py` (for a full list, run `uv run python run_experiments.py -h`). Common groups:
+
+| Area | Commands | Default output under `results/` (see `config.py` to override) |
+|------|----------|----------------------------------------------------------------|
+| Gestalt | `gestalt`, `gestalt-depth-ablation` | `gestalt/`, `gestalt_depth_ablation/` |
+| DAVIS preprocess | `download-tapvid-davis`, `davis-preprocess`, `davis-extract-dino`, … | Writes under `assets/tapvid_davis_30_videos_processed/` |
+| DAVIS experiments | `davis-tracking-sam`, `davis-tracking-gt-init`, `davis-subsampling-sam`, `davis-subsampling-gt-init`, `davis-ablation-sam`, `davis-ablation-gt-init`, `cotracker` | `davis_tracking/`, `davis_subsampling/`, `davis_ablation/`, `cotracker_baseline/`, and `*_gt_init` variants for TAP-Vid frame-0 init |
+| RDK | `rdk-preprocess`, `psychophysics-benchmark`, `psychophysics-rdk-ablation-fixed`, `psychophysics-rdk-ablation-adaptive` | `psychophysics/` (and assets under `assets/RDK/`) |
+| Postprocessing | `postprocess-gestalt`, `postprocess-davis`, `postprocess-psychophysics` | `postprocessing/` |
+
 
 ## Configuration
 

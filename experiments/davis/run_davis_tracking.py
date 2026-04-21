@@ -74,6 +74,7 @@ NUM_HYPERBLOBS_ORIGINAL = 9
 FOCAL_LENGTH = 520.0
 BLOB_COUNTING_THRESHOLD = 0
 RANDOM_SEED = 42
+_DATAPOINT_RETAIN_PCT = 12.5
 
 # ============================================================================
 # Model Definition with DINO Features
@@ -252,8 +253,48 @@ def extract_dino_features(stimulus, pca_features, img_dims, num_timesteps):
     tracked_features = tracked_features.reshape(num_timesteps, -1, num_features)
     return tracked_features
 
-def initialize_model_with_dino(tracked_points, num_blobs, num_hyperblobs,
-                               segmentation_mask, motion_vectors, tracked_features, img_dims, video_name):
+
+def sample_datapoints_percentage(
+    tracked_points, tracked_motion_vectors, percentage, seed=None, same_indices_all_timesteps=True
+):
+    """Randomly keep *percentage* of datapoints (same indices at all timesteps if requested)."""
+    if seed is not None:
+        np.random.seed(seed)
+
+    T, num_points = tracked_points.shape[:2]
+    num_points_to_keep = max(1, int(num_points * percentage / 100.0))
+
+    if same_indices_all_timesteps:
+        sampled_indices = np.random.choice(num_points, num_points_to_keep, replace=False)
+        sampled_indices = np.sort(sampled_indices)
+        sampled_tracked_points = tracked_points[:, sampled_indices, ...]
+        sampled_tracked_motion_vectors = tracked_motion_vectors[:, sampled_indices, ...]
+        return sampled_tracked_points, sampled_tracked_motion_vectors, sampled_indices
+    sampled_indices_batched = np.zeros((T, num_points_to_keep), dtype=int)
+    sampled_tracked_points = np.zeros((T, num_points_to_keep) + tracked_points.shape[2:], dtype=tracked_points.dtype)
+    sampled_tracked_motion_vectors = np.zeros(
+        (T, num_points_to_keep) + tracked_motion_vectors.shape[2:], dtype=tracked_motion_vectors.dtype
+    )
+    for t in range(T):
+        idx = np.random.choice(num_points, num_points_to_keep, replace=False)
+        idx = np.sort(idx)
+        sampled_indices_batched[t] = idx
+        sampled_tracked_points[t] = tracked_points[t, idx, ...]
+        sampled_tracked_motion_vectors[t] = tracked_motion_vectors[t, idx, ...]
+    return sampled_tracked_points, sampled_tracked_motion_vectors, sampled_indices_batched
+
+
+def initialize_model_with_dino(
+    tracked_points,
+    num_blobs,
+    num_hyperblobs,
+    segmentation_mask,
+    motion_vectors,
+    tracked_features,
+    img_dims,
+    video_name,
+    subsampled_indices=None,
+):
     """Initialize model with DINO features."""
     from genjax import ChoiceMapBuilder as C
 
@@ -261,15 +302,22 @@ def initialize_model_with_dino(tracked_points, num_blobs, num_hyperblobs,
         segmentation_mask = cv2.imread(SAM_FRAME0_PATH_TEMPLATE.format(video_name), cv2.IMREAD_COLOR)
         segmentation_mask = cv2.cvtColor(segmentation_mask, cv2.COLOR_BGR2RGB)
         kmeans_chm, roi_blob_indices, roi_hyperblob_indices, num_hyperblobs_actual = make_hierarchical_kmeans_chm_with_SAM_segmentations(
-            tracked_points, num_blobs, segmentation_mask, img_dims,
+            tracked_points,
+            num_blobs,
+            segmentation_mask,
+            img_dims,
             motion_vectors=motion_vectors,
+            subsampled_indices=subsampled_indices,
         )
     else:
         kmeans_chm, roi_blob_indices, roi_hyperblob_indices = make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob(
-            tracked_points, num_blobs, num_hyperblobs,
+            tracked_points,
+            num_blobs,
+            num_hyperblobs,
             segmentation_mask=segmentation_mask,
             motion_vectors=motion_vectors,
             num_roi_blobs=None,
+            subsampled_indices=subsampled_indices,
         )
         num_hyperblobs_actual = num_hyperblobs
 
@@ -742,26 +790,45 @@ def process_video(video_name):
         # Close the npz file to free memory
         pca_data.close()
 
-        tracked_points, tracked_motion_vectors, num_data_tsteps, img_dims = \
+        tracked_points_full, tracked_motion_vectors_full, num_data_tsteps, img_dims = \
             extract_3d_points_and_motion_vectors_data(DAVIS_3D_MOTION_PATH, video_name)
 
         # Limit to first 90 frames for jello-trim
         if video_name == "jello_trim":
             num_data_tsteps = min(num_data_tsteps, 90)
-            tracked_points = tracked_points[:num_data_tsteps]
-            tracked_motion_vectors = tracked_motion_vectors[:num_data_tsteps]
+            tracked_points_full = tracked_points_full[:num_data_tsteps]
+            tracked_motion_vectors_full = tracked_motion_vectors_full[:num_data_tsteps]
             print(f"Limited to first {num_data_tsteps} frames for jello_trim")
 
-        tracked_features = extract_dino_features(video_name, pca_features_unnormalized, img_dims, num_data_tsteps)
+        tracked_features_full = extract_dino_features(
+            video_name, pca_features_unnormalized, img_dims, num_data_tsteps
+        )
 
         first_frame_seg = get_segmentation_mask(
             video_name, 0, DAVIS_SEGMASKS_PATH, img_dims=img_dims, flatten=True
         )
 
+        tracked_points, tracked_motion_vectors, subsampled_indices = sample_datapoints_percentage(
+            tracked_points_full,
+            tracked_motion_vectors_full,
+            _DATAPOINT_RETAIN_PCT,
+            seed=RANDOM_SEED,
+            same_indices_all_timesteps=True,
+        )
+        tracked_features = tracked_features_full[:, subsampled_indices, :]
+        first_frame_seg_init = first_frame_seg[subsampled_indices]
+
         # Initialize
         kmeans_chm, roi_blob_indices, roi_hyperblob_indices, num_hyperblobs = initialize_model_with_dino(
-            tracked_points, NUM_BLOBS, NUM_HYPERBLOBS_ORIGINAL,
-            first_frame_seg, tracked_motion_vectors, tracked_features, img_dims, video_name
+            tracked_points,
+            NUM_BLOBS,
+            NUM_HYPERBLOBS_ORIGINAL,
+            first_frame_seg_init,
+            tracked_motion_vectors,
+            tracked_features,
+            img_dims,
+            video_name,
+            subsampled_indices=subsampled_indices,
         )
 
         # Create hyperparameters
@@ -1016,7 +1083,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(_davis_dir))
     import davis_run_cli
 
-    _parser = argparse.ArgumentParser(description="DAVIS DINO full-grid tracking")
+    _parser = argparse.ArgumentParser(description="DAVIS DINO tracking")
     davis_run_cli.add_frame0_init_args(_parser)
     davis_run_cli.add_save_3wide_video_args(_parser)
     davis_run_cli.add_skip_completed_args(_parser)
