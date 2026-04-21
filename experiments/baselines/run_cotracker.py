@@ -22,6 +22,11 @@ from tqdm import tqdm
 # Add parent directory to path
 sys.path.insert(0, str(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))))
 import config
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
 from genmatter.evaluation import get_segmentation_mask
 
 # ============================================================================
@@ -620,6 +625,28 @@ print(f"{'MEDIAN':<20} {'':<7} {'':<8} {'':<8} {np.median(all_precision):>7.3f} 
 print(f"{'STD':<20} {'':<7} {'':<8} {'':<8} {np.std(all_precision):>7.3f} "
       f"{np.std(all_recall):>7.3f} {np.std(all_f1):>7.3f} {np.std(all_jaccard):>7.3f} "
       f"{np.std(all_fn_rates):>7.2f} {np.std(all_fp_rates):>7.2f}")
+
+if len(all_results) > 0:
+    print(f"\n{'='*80}")
+    print(f"AGGREGATE STATISTICS ACROSS ALL VIDEOS ({len(all_results)} videos)")
+    print(
+        f"  (95% CIs: percentile bootstrap on video means, B={BOOTSTRAP_N_SAMPLES}, seed={BOOTSTRAP_RANDOM_SEED})"
+    )
+    print(f"\n  Per-video mean metrics (same scale as table above):")
+    for label, arr in [
+        ("Precision", all_precision),
+        ("Recall", all_recall),
+        ("F1", all_f1),
+        ("Jaccard", all_jaccard),
+    ]:
+        m, lo, hi = bootstrap_mean_ci_95(arr)
+        print(f"    {label:18s} {m:.3f} [{lo:.3f}, {hi:.3f}]")
+    for label, arr in [
+        ("FN rate (%)", all_fn_rates),
+        ("FP rate (%)", all_fp_rates),
+    ]:
+        m, lo, hi = bootstrap_mean_ci_95(arr)
+        print(f"    {label:18s} {m:.2f} [{lo:.2f}, {hi:.2f}]")
 
 print(f"\nTotal videos processed: {len(all_results)}/{len(VIDEO_NAMES)}")
 print(f"Results saved to: {OUTPUT_DIR}")
