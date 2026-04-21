@@ -1,4 +1,3 @@
-https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/.DS_Store
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00000/render_passes/masks/Image0001.png
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00000/render_passes/masks/Image0002.png
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00000/render_passes/masks/Image0003.png
@@ -143,7 +142,6 @@ https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00002/texture_25/masks/flowsam_matched_reprocessed/frame_00003_matched.png
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00002/texture_25/masks/flowsam_matched_reprocessed/frame_00004_matched.png
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00002/texture_25/output_six_frame_depths.npz
-https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00003/.DS_Store
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00003/render_passes/masks/Image0001.png
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00003/render_passes/masks/Image0002.png
 https://genmatter-data.s3.us-east-2.amazonaws.com/gestalt_stimuli/gestalt_scenes/scene_00003/render_passes/masks/Image0003.png
