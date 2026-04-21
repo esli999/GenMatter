@@ -52,7 +52,7 @@ The paper has **three** experiments. Put all data for the experiments under **`a
 
 **What’s inside**
 
-- **`from_thomas/`** — One folder per scene (`scene_00000` … `scene_00019`). Each scene has `render_passes/masks/` (PNG masks), and per **texture** (`texture_00`, `texture_07`, … — seven in total) depth in `output_six_frame_depths.npz` and FlowSAM masks under `masks/flowsam_matched_reprocessed/`.
+- **`gestalt_scenes/`** — One folder per scene (`scene_00000` … `scene_00019`). Each scene has `render_passes/masks/` (PNG masks), and per **texture** (`texture_00`, `texture_07`, … — seven in total) depth in `output_six_frame_depths.npz` and FlowSAM masks under `masks/flowsam_matched_reprocessed/`.
 - **`raft_flows/`** — One `raft_flows_<scene>_<texture>.npz` per condition (trimmed optical flow).
 
 **Scale:** 20 scenes × 7 textures (see `config.py`).

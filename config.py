@@ -2,7 +2,7 @@
 Central paths and shared experiment constants for GenMatter.
 
 With default ``GENMATTER_DATA_DIR`` (repository root), inputs live under ``<repo>/assets/``:
-``gestalt_stimuli/{from_thomas,raft_flows}/``, ``tapvid_davis_30_videos_processed/``, ``RDK/``.
+``gestalt_stimuli/{gestalt_scenes,raft_flows}/``, ``tapvid_davis_30_videos_processed/``, ``RDK/``.
 See README for layout. Optional per-stimulus JAX seeds: ``GENMATTER_RDK_REPRO_KEYS_PATH`` or
 ``reproducibility_keys.json`` under the RDK directory.
 
@@ -30,7 +30,7 @@ def _legacy_data_root() -> Path | None:
 
 
 def _resolve_assets_parent() -> Path:
-    """Directory that contains ``from_thomas/`` and (for DAVIS) ``tapvid_davis_30_videos_processed/``."""
+    """Directory that contains ``gestalt_scenes/`` and (for DAVIS) ``tapvid_davis_30_videos_processed/``."""
     if os.environ.get("GENMATTER_DAVIS_DIR"):
         return Path(os.environ["GENMATTER_DAVIS_DIR"])
     local = REPO_ROOT / "assets"
@@ -67,14 +67,14 @@ def _resolve_data_dir() -> Path:
 
 GENMATTER_DATA_DIR = _resolve_data_dir()
 
-# Gestalt stimuli + RAFT under ``assets/gestalt_stimuli/{from_thomas,raft_flows}``
+# Gestalt stimuli + RAFT under ``assets/gestalt_stimuli/{gestalt_scenes,raft_flows}``
 GENMATTER_LOCAL_ASSETS = GENMATTER_DATA_DIR / "assets"
 GESTALT_STIMULI_DIR = (
     Path(os.environ["GENMATTER_GESTALT_STIMULI_DIR"]).expanduser().resolve()
     if os.environ.get("GENMATTER_GESTALT_STIMULI_DIR")
     else (GENMATTER_LOCAL_ASSETS / "gestalt_stimuli")
 )
-GESTALT_BASE_PATH = GESTALT_STIMULI_DIR / "from_thomas"
+GESTALT_BASE_PATH = GESTALT_STIMULI_DIR / "gestalt_scenes"
 
 # First N flow frames match ``load_six_frame_gestalt_data`` / GenMatter pairing with 6 depth frames
 GESTALT_RAFT_NUM_FLOW_FRAMES = int(os.environ.get("GENMATTER_RAFT_NUM_FLOW_FRAMES", "5"))
@@ -156,7 +156,7 @@ PSYCHOPHYSICS_OUTPUT_DIR = RESULTS_DIR / "psychophysics"
 DAVIS_PARENT_DIR = _resolve_assets_parent()
 DAVIS_BASE = DAVIS_PARENT_DIR / "tapvid_davis_30_videos_processed"
 
-# Populate script defaults (full RAFT + source ``from_thomas`` tree under ``--source``)
+# Populate script defaults (full RAFT + source ``gestalt_scenes`` tree under ``--source``)
 POPULATE_GESTALT_SOURCE_DIR = DAVIS_PARENT_DIR
 POPULATE_FULL_RAFT_SOURCE_DIR = _resolve_full_raft_source_dir()
 DAVIS_3D_MOTION_PATH = DAVIS_BASE / "tapvid_davis_npzs"

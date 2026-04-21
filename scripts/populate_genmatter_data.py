@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Copy Gestalt inputs into ``<GENMATTER_DATA_DIR>/assets/gestalt_stimuli/`` (default: ``assets/gestalt_stimuli/``) from a source tree that has
-``from_thomas/`` plus full-length RAFT ``*.npz`` (defaults: real ``<repo>/assets``
+``gestalt_scenes/`` plus full-length RAFT ``*.npz`` (defaults: real ``<repo>/assets``
 and ``<repo>/raft_flows``, else ``GENMATTER_LEGACY_DATA_ROOT`` when set; see ``config.py``).
 
 RAFT ``.npz`` files are written trimmed to ``GESTALT_RAFT_NUM_FLOW_FRAMES`` and
@@ -80,36 +80,36 @@ def _write_trimmed_raft_npz(
     np.savez_compressed(dst, flow=flow_trim)
 
 
-def populate_gestalt_from_thomas(
-    source_from_thomas_parent: Path, dry_run: bool
+def populate_gestalt_gestalt_scenes(
+    source_gestalt_scenes_parent: Path, dry_run: bool
 ) -> None:
     """Copy minimal files into ``config.GESTALT_BASE_PATH``."""
-    src_thomas = source_from_thomas_parent / "from_thomas"
-    dst_thomas = config.GESTALT_BASE_PATH
-    print(f"Gestalt → {dst_thomas}")
+    src_gestalt_scenes = source_gestalt_scenes_parent / "gestalt_scenes"
+    dst_gestalt_scenes = config.GESTALT_BASE_PATH
+    print(f"Gestalt → {dst_gestalt_scenes}")
     for scene in config.GESTALT_SCENES:
-        mask_dir = src_thomas / scene / "render_passes" / "masks"
+        mask_dir = src_gestalt_scenes / scene / "render_passes" / "masks"
         for fi in GESTALT_MASK_FRAMES:
             name = f"Image{fi:04d}.png"
             _copy_file(
                 mask_dir / name,
-                dst_thomas / scene / "render_passes" / "masks" / name,
+                dst_gestalt_scenes / scene / "render_passes" / "masks" / name,
                 dry_run=dry_run,
             )
         for tex in config.GESTALT_TEXTURES:
-            depth = src_thomas / scene / tex / "output_six_frame_depths.npz"
+            depth = src_gestalt_scenes / scene / tex / "output_six_frame_depths.npz"
             _copy_file(
                 depth,
-                dst_thomas / scene / tex / "output_six_frame_depths.npz",
+                dst_gestalt_scenes / scene / tex / "output_six_frame_depths.npz",
                 dry_run=dry_run,
             )
-            flowsam_dir = src_thomas / scene / tex / config.FLOWSAM_MASKS_SUBPATH
+            flowsam_dir = src_gestalt_scenes / scene / tex / config.FLOWSAM_MASKS_SUBPATH
             if flowsam_dir.is_dir():
                 for idx in FLOWSAM_FRAME_INDICES:
                     fname = f"frame_{idx:05d}_matched.png"
                     _copy_file(
                         flowsam_dir / fname,
-                        dst_thomas
+                        dst_gestalt_scenes
                         / scene
                         / tex
                         / config.FLOWSAM_MASKS_SUBPATH
@@ -140,7 +140,7 @@ def main() -> None:
         type=Path,
         default=config.POPULATE_GESTALT_SOURCE_DIR,
         help=(
-            "Directory that contains ``from_thomas/`` "
+            "Directory that contains ``gestalt_scenes/`` "
             "(default: real <repo>/assets, else GENMATTER_LEGACY_DATA_ROOT/assets when set; "
             "see config.py)"
         ),
@@ -167,7 +167,7 @@ def main() -> None:
 
     print(f"Gestalt dest:  {config.GESTALT_BASE_PATH}")
     print(f"RAFT dest:     {config.RAFT_FLOWS_PATH}")
-    print(f"from_thomas ← {src / 'from_thomas'}")
+    print(f"gestalt_scenes ← {src / 'gestalt_scenes'}")
     print(f"RAFT src:      {raft_src}")
     print()
 
@@ -177,7 +177,7 @@ def main() -> None:
     if args.raft_only:
         populate_minimal_raft(raft_src, args.dry_run)
     else:
-        populate_gestalt_from_thomas(src, args.dry_run)
+        populate_gestalt_gestalt_scenes(src, args.dry_run)
         populate_minimal_raft(raft_src, args.dry_run)
 
     print("\nDone.")
