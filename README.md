@@ -1,173 +1,162 @@
 # GenMatter
 
-Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TAP-Vid DAVIS).
+Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TAP-Vid DAVIS + RDK Psychophysics).
 
 ## Requirements
 
 - CUDA 12.4+ and a compatible NVIDIA driver  
-- GPU with ≥ 24 GB memory (as used in the paper setup)  
-- Python 3.11  
+- GPU with <= 24 GB memory (as used in the paper setup)  
+- Python 3.11 (pinned via `.python-version`; uv will download it if missing)  
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for the virtualenv and locked dependencies  
 
 ## Install
 
-```bash
-conda create -n genparticles python=3.11
-conda activate genparticles
-pip install -r requirements.txt
-```
-
-## Data layout (defaults)
-
-All paths are set in **`config.py`** (overridable with env vars below).
-
-| Location | Contents |
-|----------|----------|
-| **`genmatter_data/assets/from_thomas/`** | Gestalt stimuli (see *Required assets* below) |
-| **`genmatter_data/assets/raft_flows/`** | Trimmed RAFT optical flow `*.npz` (5 frames, compressed) |
-| **`<GENMATTER_DAVIS_DIR>/tapvid_davis_30_videos_processed/`** | DAVIS TAP-Vid bundle (RGB, motion, masks, DINO, SAM) |
-
-**DAVIS parent directory** (where `tapvid_davis_30_videos_processed/` lives):
-
-1. If **`GENMATTER_DAVIS_DIR`** is set → use that.
-2. Else if **`<repo>/assets`** exists as a **real** directory (not a symlink) → use it.
-3. Else → **`$GENMATTER_LEGACY_DATA_ROOT/assets`** (default: `/home/esli/GenParticles_neural_stimulus/assets`).
-
-So DAVIS usually resolves to  
-`…/assets/tapvid_davis_30_videos_processed/` without symlinks in the repo.
-
-Gestalt does **not** use that tree; it only uses **`genmatter_data/assets/`**.
-
-**Populate defaults** (`run_experiments.py populate-data`): `--source` and `--raft-source` follow the same rule (real `<repo>/assets` and `<repo>/raft_flows`, else legacy root). Notebooks or scripts that pointed at old top-level symlinks (`assets`, `raft_flows`, `final_cvpr_results/…`) should use the real paths under your **`GENMATTER_LEGACY_DATA_ROOT`** or **`GenParticles_NeurIPS`** checkout instead.
-
-### If you already had `genmatter_data/from_thomas/` (old layout)
+From the repository root:
 
 ```bash
-mkdir -p genmatter_data/assets
-mv genmatter_data/from_thomas genmatter_data/assets/
-mv genmatter_data/raft_flows genmatter_data/assets/
+uv sync
 ```
 
-### Populate Gestalt from a source tree with `from_thomas/` + full RAFT files
+## Data
 
-Copies the **minimal** Gestalt file set and writes **trimmed** RAFT npz under `genmatter_data/assets/`:
+The paper has **three** experiments. Put all data for the experiments under **`assets/`** at the repository root (that directory is gitignored).
+
+
+| Setup | Role | Root under `assets/` |
+|-------|------|------------------------|
+| **Gestalt** | Synthetic rendered scenes: mask propagation, depth, RAFT flow | `gestalt_stimuli/` |
+| **DAVIS (TAP-Vid)** | 30 real DAVIS videos with 3D motion, DINO, SAM, etc. | `tapvid_davis_30_videos_processed/` |
+| **RDK psychophysics** | Random-dot stimuli for human–model comparison | `RDK/` |
+
+### Gestalt (`assets/gestalt_stimuli/`)
+
+**What’s inside**
+
+- **`gestalt_scenes/`** — One folder per scene (`scene_00000` … `scene_00019`). Each scene has `render_passes/masks/` (PNG masks), and per **texture** (`texture_00`, `texture_07`, … — seven in total) depth in `output_six_frame_depths.npz` and FlowSAM masks under `masks/flowsam_matched_reprocessed/`.
+- **`raft_flows/`** — One `raft_flows_<scene>_<texture>.npz` per condition (trimmed optical flow).
+
+**Scale:** 20 scenes × 7 textures (see `config.py`).
+
+**Download (from AWS S3)**
 
 ```bash
-conda activate genparticles
-python run_experiments.py populate-data
-# optional: only refresh RAFT
-python run_experiments.py populate-data --raft-only
+uv run python scripts/download_url_list.py -P assets -c -i scripts/gestalt_stimuli_urls.txt
 ```
 
-Source defaults: same resolution as `config.POPULATE_*` (real repo dirs, else `GENMATTER_LEGACY_DATA_ROOT`).  
-Override: `python scripts/populate_genmatter_data.py --source /path --raft-source /path`
+### DAVIS TAP-Vid (`assets/tapvid_davis_30_videos_processed/`)
+
+**What’s inside** — For each of the **30** videos in `config.TAPVID_DAVIS_VIDEO_NAMES`, the pipeline reads from these subfolders:
+
+| Subfolder | Contents |
+|-----------|----------|
+| `tapvid_davis_rgb_frames/` | RGB frames |
+| `tapvid_davis_segmasks/` | Segmentation masks |
+| `tapvid_davis_npzs/` | Npz bundles (e.g. `{video}_3d_motion.npz` after `davis-preprocess`) |
+| `tapvid_davis_dino/` | DINO features |
+| `tapvid_davis_SAM_frame0/` | SAM output at frame 0 |
+
+**Download**
+
+**Option A — AWS S3 mirror**
+
+```bash
+uv run python scripts/download_url_list.py -P assets -c -i scripts/tapvid_davis_urls.txt
+```
+
+Expect roughly **5–7 minutes** download time on a typical connection. The list begins with **large npz files**, so the progress bar (pegged to number of files) looks slow at first; but picks up later rapidly.
+
+**Option B — Download DAVIS + preprocess** (downloads DAVIS, then builds npzs, DINO, SAM, 3D motion)
+
+```bash
+uv run python run_experiments.py download-tapvid-davis
+uv run python run_experiments.py davis-preprocess
+```
+
+### RDK psychophysics (`assets/RDK/`)
+
+**What’s inside**
+
+- **`RDK_configs.json`** — Stimulus definitions  
+- **`config_<n>/data.npz`** — Per-configuration stimulus data  
+- **`reproducibility_keys.json`** (optional) — Per-stimulus seeds for JAX  
+
+**Download**
+
+**Option A — AWS S3**
+
+```bash
+uv run python scripts/download_url_list.py -P assets -c -i scripts/rdk_urls.txt
+```
+
+**Option B — local preprocess**
+
+```bash
+uv run python run_experiments.py rdk-preprocess
+```
 
 ---
 
-## Required extracted assets
+## Running the Experiments
 
-### Gestalt (`genmatter_data/assets/`)
+After [data](#data) is in place:
 
-**Scenes:** `scene_00000` … `scene_00019`  
-**Textures:** `texture_00`, `texture_07`, `texture_13`, `texture_16`, `texture_21`, `texture_22`, `texture_25`
+```bash
+# Gestalt
+uv run python run_experiments.py gestalt
+uv run python run_experiments.py gestalt-depth-ablation
 
-Per **scene**:
+# DAVIS — SAM vs GT frame-0 init (pair as you need)
+uv run python run_experiments.py davis-tracking-sam
+uv run python run_experiments.py davis-tracking-gt-init
+uv run python run_experiments.py davis-ablation-sam
+uv run python run_experiments.py davis-ablation-gt-init
+uv run python run_experiments.py cotracker
 
-- `render_passes/masks/Image0001.png` … `Image0006.png` (GT masks)
+# optional -- if you want to run a spped test (FPS) at different subsampling rates
+uv run python run_experiments.py davis-subsampling-sam
+uv run python run_experiments.py davis-subsampling-gt-init
 
-Per **scene / texture**:
+# RDK / psychophysics
+uv run python run_experiments.py psychophysics-benchmark
+uv run python run_experiments.py psychophysics-rdk-ablation-fixed
+uv run python run_experiments.py psychophysics-rdk-ablation-adaptive
+```
 
-- `output_six_frame_depths.npz` (6 inverse-depth frames; key `depths` or first array)
-- Optional for `postprocess-gestalt` vs FlowSAM:  
-  `masks/flowsam_matched_reprocessed/frame_00000_matched.png` … `frame_00004_matched.png`
+**Postprocessing** (run after the corresponding experiments have written JSON under `results/`):
 
-**RAFT** (`genmatter_data/assets/raft_flows/`):
+```bash
+uv run python run_experiments.py postprocess-gestalt
+uv run python run_experiments.py postprocess-davis
+uv run python run_experiments.py postprocess-psychophysics
+```
 
-- One file per (scene, texture): `raft_flows_{scene}_{texture}.npz`  
-- After `populate-data`: contains **5** flow frames, key **`flow`**, zlib-compressed.
-
-### DAVIS TAP-Vid (`tapvid_davis_30_videos_processed/`)
-
-**Videos:** exactly the 30 names in **`config.TAPVID_DAVIS_VIDEO_NAMES`**.
-
-Under **`tapvid_davis_30_videos_processed/`** you need:
-
-| Subdirectory | Per-video files |
-|--------------|-----------------|
-| `tapvid_davis_rgb_frames/{video}/` | RGB frames (`*.jpg`) |
-| `tapvid_davis_npzs/` | `{video}_3d_motion.npz` |
-| `tapvid_davis_segmasks/{video}/` | Segmentation masks |
-| `tapvid_davis_dino/` | `{video}_dino_pca_per_pixel.npz` (from `davis-extract-dino`) |
-| `tapvid_davis_SAM_frame0/` | `{video}_SAM_frame0.png` |
+Aggregated tables and CSVs: `results/postprocessing/`.
 
 ---
 
-## How to run experiments
+## The `run_experiments` CLI
 
-Use the same conda env you installed into (**JAX / PyTorch / genparticles live there**):
-
-```bash
-conda activate genparticles
-cd /path/to/GenMatter   # repo root
-```
-
-Then:
+Every experiment and postprocessing step is invoked the same way:
 
 ```bash
-# 0) One-time: DINO features for DAVIS (needs RGB frames + 3d motion npzs already)
-python run_experiments.py davis-extract-dino
-
-# Gestalt (needs genmatter_data/assets/ populated)
-python run_experiments.py gestalt
-python run_experiments.py gestalt-depth-ablation
-
-# DAVIS HDGMM + baselines
-python run_experiments.py davis-tracking
-python run_experiments.py davis-subsampling
-python run_experiments.py davis-ablation
-python run_experiments.py cotracker
+uv run python run_experiments.py <command>
 ```
 
-**Postprocessing** (after the matching runs have written under `results/`; same env):
+`<command>` is one of the keys in `run_experiments.py` (for a full list, run `uv run python run_experiments.py -h`). Common groups:
 
-```bash
-conda activate genparticles
-python run_experiments.py postprocess-gestalt          # + SegAnyMo / FlowSAM paths in config
-python run_experiments.py postprocess-gestalt-ablation
-python run_experiments.py postprocess-davis
-```
+| Area | Commands | Default output under `results/` (see `config.py` to override) |
+|------|----------|----------------------------------------------------------------|
+| Gestalt | `gestalt`, `gestalt-depth-ablation` | `gestalt/`, `gestalt_depth_ablation/` |
+| DAVIS preprocess | `download-tapvid-davis`, `davis-preprocess`, `davis-extract-dino`, … | Writes under `assets/tapvid_davis_30_videos_processed/` |
+| DAVIS experiments | `davis-tracking-sam`, `davis-tracking-gt-init`, `davis-subsampling-sam`, `davis-subsampling-gt-init`, `davis-ablation-sam`, `davis-ablation-gt-init`, `cotracker` | `davis_tracking/`, `davis_subsampling/`, `davis_ablation/`, `cotracker_baseline/`, and `*_gt_init` variants for TAP-Vid frame-0 init |
+| RDK | `rdk-preprocess`, `psychophysics-benchmark`, `psychophysics-rdk-ablation-fixed`, `psychophysics-rdk-ablation-adaptive` | `psychophysics/` (and assets under `assets/RDK/`) |
+| Postprocessing | `postprocess-gestalt`, `postprocess-davis`, `postprocess-psychophysics` | `postprocessing/` |
 
-Outputs: `results/postprocessing/*.json` and `*.csv`.
 
----
+## Configuration
 
-## Configuration (env vars)
+Paths, defaults, and experiment constants live in **`config.py`**, including environment variables you can set to override locations (data roots, results, optional SegAnyMo paths, and similar). Edit that file or export the variables it reads to match your machine.
 
-| Env var | Role |
-|---------|------|
-| `GENMATTER_DATA_DIR` | Root for `assets/` subfolder (default `<repo>/genmatter_data`) |
-| `GENMATTER_DAVIS_DIR` | Parent of `tapvid_davis_30_videos_processed/` (overrides auto-resolve) |
-| `GENMATTER_LEGACY_DATA_ROOT` | Fallback when `<repo>/assets` or `<repo>/raft_flows` are missing or symlinks (default `…/GenParticles_neural_stimulus`) |
-| `GENMATTER_RAFT_SOURCE_DIR` | Full-length RAFT npz dir for `populate-data` (overrides auto-resolve) |
-| `GENMATTER_RAFT_FLOWS_PATH` | Trimmed RAFT output directory (default `genmatter_data/assets/raft_flows`) |
-| `GENMATTER_RAFT_NUM_FLOW_FRAMES` | Flow frames kept in trimmed RAFT (default `5`) |
-| `GENMATTER_RESULTS_DIR` | Where `results/` lives |
-| `SEGANYMO_BASE_PATH` | For `postprocess-gestalt` SegAnyMo masks |
+## License
 
----
-
-## Repo map
-
-```
-config.py                 # Paths + TAPVID_DAVIS_VIDEO_NAMES + GESTALT_SCENES/TEXTURES
-run_experiments.py        # CLI: populate-data, gestalt, davis-*, cotracker, postprocess-*
-scripts/populate_genmatter_data.py
-experiments/gestalt/      # Mask-propagation Gestalt
-experiments/davis/        # DINO extract, tracking, subsampling, ablation
-experiments/baselines/    # CoTracker3
-postprocessing/           # Metrics aggregation
-genparticles/             # Core library
-```
-
-**CoTracker3** weights load from PyTorch Hub on first use.
-
-**DAVIS depth / 3D motion:** use your Video-Depth-Anything + `preprocessing/motion_extraction_3d/davis_motion_extraction.py` pipeline to produce the `tapvid_davis_npzs` files before tracking.
+This project is licensed under the MIT License; see [`LICENSE`](LICENSE).

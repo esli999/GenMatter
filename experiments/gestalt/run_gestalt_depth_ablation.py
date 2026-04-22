@@ -24,21 +24,26 @@ from jax.scipy.ndimage import map_coordinates
 
 # Import from experiments.gestalt.algorithm
 from experiments.gestalt.algorithm import (
-    HDGMM_model_3d, resize_to_square, load_gestalt_data,
+    GenMatter_model_3d, resize_to_square, load_gestalt_data,
     compute_3d_points_and_motion, extract_gestalt_segmentation
 )
 
-from genparticles.utils import make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob
+from genmatter.utils import make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
 
-from genparticles.datatypes import *
-from genparticles.model_3d import *
-from genparticles.inference import *
-from genparticles.dataloader import *
-from genparticles.utils import *
+from genmatter.datatypes import *
+from genmatter.model_3d import *
+from genmatter.inference import *
+from genmatter.dataloader import *
+from genmatter.utils import *
 
 # JIT compile model functions
-model_jsimulate = jax.jit(HDGMM_model_3d.simulate)
-model_jimportance = jax.jit(HDGMM_model_3d.importance)
+model_jsimulate = jax.jit(GenMatter_model_3d.simulate)
+model_jimportance = jax.jit(GenMatter_model_3d.importance)
 
 # Configuration
 EXPERIMENT_NAME = "Video_Gestalt_Mask_Propagation_No_Depth_Ablation_Flow_Init"
@@ -434,12 +439,12 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
     key = jkey(random_seed)
     key, key_importance = jax.random.split(key)
     init_tr, _ = model_jimportance(key_importance, kmeans_chm, (hypers,))
-    init_hdgmm_state = init_tr.get_retval()
+    init_genmatter_state = init_tr.get_retval()
 
     # Run initial Gibbs sweeps on first frame
     key, init_gibbs_key = jax.random.split(key)
-    gibbs_wtrs = hdgmm_full_gibbs(
-        init_gibbs_key, init_hdgmm_state, NUM_INITIAL_GIBBS_ITERATIONS,
+    gibbs_wtrs = genmatter_full_gibbs(
+        init_gibbs_key, init_genmatter_state, NUM_INITIAL_GIBBS_ITERATIONS,
         GIBBS_DIALS, use_weighted_blobs=True, num_gibbs_inner_loops=NUM_GIBBS_INNER_LOOPS
     )
 
@@ -559,13 +564,13 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
         # Initialize with propagated state
         key, frame_key_importance = jax.random.split(key)
         frame_init_tr, _ = model_jimportance(frame_key_importance, propagated_chm, (current_state.hypers,))
-        frame_init_hdgmm_state = frame_init_tr.get_retval()
+        frame_init_genmatter_state = frame_init_tr.get_retval()
 
         # STEP 1: Update velocities first
         key, velocity_gibbs_key = jax.random.split(key)
-        velocity_update_wtrs = hdgmm_full_gibbs(
+        velocity_update_wtrs = genmatter_full_gibbs(
             velocity_gibbs_key,
-            frame_init_hdgmm_state,
+            frame_init_genmatter_state,
             NUM_VELOCITY_UPDATE_ITERATIONS,
             VELOCITY_UPDATE_DIALS,
             use_weighted_blobs=True,
@@ -594,7 +599,7 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
                 C['datapoints', 'datapoint_positions'].set(state.datapoints_state.datapoint_positions) |
                 C['datapoints', 'datapoint_vels'].set(state.datapoints_state.datapoint_vels)
             )
-            weight, _ = HDGMM_model_3d.assess(chm, (state.hypers,))
+            weight, _ = GenMatter_model_3d.assess(chm, (state.hypers,))
             velocity_log_probs.append(float(weight))
 
         best_velocity_idx = np.argmax(velocity_log_probs) * velocity_sample_freq
@@ -602,7 +607,7 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
 
         # STEP 2: Full Gibbs sampling
         key, frame_gibbs_key = jax.random.split(key)
-        frame_gibbs_wtrs = hdgmm_full_gibbs(
+        frame_gibbs_wtrs = genmatter_full_gibbs(
             frame_gibbs_key,
             velocity_updated_state,
             NUM_TRACKING_GIBBS_ITERATIONS,
@@ -641,7 +646,7 @@ def run_single_experiment(scene, texture, random_seed, true_masks, points_3d, mo
                 C['datapoints', 'datapoint_positions'].set(state.datapoints_state.datapoint_positions) |
                 C['datapoints', 'datapoint_vels'].set(state.datapoints_state.datapoint_vels)
             )
-            weight, _ = HDGMM_model_3d.assess(chm, (state.hypers,))
+            weight, _ = GenMatter_model_3d.assess(chm, (state.hypers,))
             full_log_probs.append(float(weight))
 
         best_full_idx = np.argmax(full_log_probs) * full_sample_freq
@@ -794,7 +799,7 @@ def run_experiment_for_scene_texture(scene, texture):
         mean_points_per_roi_blob = jnp.sum(jnp.isin(kmeans_chm['datapoints', 'blob_assignments'], roi_blob_indices)) / len(roi_blob_indices)
         empirical_nu_B = empirical_nu_V = f_(int(mean_points_per_roi_blob))
 
-        hypers = HDGMM_Hyperparams.create(
+        hypers = GenMatter_Hyperparams.create(
             outlier_prob=f_(0.001),
             outlier_velocity_gamma_shape=f_(7.5),
             outlier_velocity_gamma_rate=f_(0.5),
@@ -867,15 +872,22 @@ def run_experiment_for_scene_texture(scene, texture):
                 run_uncertainty_ratios.append(np.mean(frame_uncertainty_ratios))
 
         if len(run_overall_accuracies) > 0:
-            mean_overall_accuracy = np.mean(run_overall_accuracies)
-            std_overall_accuracy = np.std(run_overall_accuracies)
-            print(f"Mean Overall Accuracy (across {len(run_overall_accuracies)} runs): {mean_overall_accuracy:.3f} ± {std_overall_accuracy:.3f}")
+            mean_overall_accuracy, oa_lo, oa_hi = bootstrap_mean_ci_95(run_overall_accuracies)
+            print(
+                f"Mean Overall Accuracy (across {len(run_overall_accuracies)} runs): "
+                f"{mean_overall_accuracy:.3f} [{oa_lo:.3f}, {oa_hi:.3f}] "
+                f"(95% bootstrap CI, B={BOOTSTRAP_N_SAMPLES}, seed={BOOTSTRAP_RANDOM_SEED})"
+            )
             print(f"Total frames: {total_frames} (1 initial + {num_tracking_frames} tracked)")
 
             # Print uncertainty statistics
             if len(run_uncertainty_ratios) > 0:
+                ur_m, ur_lo, ur_hi = bootstrap_mean_ci_95(run_uncertainty_ratios)
                 print(f"\nUncertainty Statistics (averaged across frames and runs):")
-                print(f"  Mean uncertainty ratio: {np.mean(run_uncertainty_ratios):.3f} ± {np.std(run_uncertainty_ratios):.3f}")
+                print(
+                    f"  Mean uncertainty ratio: {ur_m:.3f} [{ur_lo:.3f}, {ur_hi:.3f}] "
+                    f"(95% bootstrap CI)"
+                )
 
             # Per-frame aggregation
             all_frame_accuracies = []
@@ -883,20 +895,22 @@ def run_experiment_for_scene_texture(scene, texture):
                 frame_accs = [r['frame_accuracies'][frame_idx] for r in all_run_results
                               if frame_idx < len(r['frame_accuracies']) and r['frame_accuracies'][frame_idx] is not None]
                 if len(frame_accs) > 0:
-                    mean_frame_acc = np.mean(frame_accs)
-                    std_frame_acc = np.std(frame_accs)
+                    mf, flo, fhi = bootstrap_mean_ci_95(frame_accs)
                     all_frame_accuracies.append({
-                        'mean': mean_frame_acc,
-                        'std': std_frame_acc,
+                        'mean': mf,
+                        'ci95_low': flo,
+                        'ci95_high': fhi,
+                        'bootstrap_n': BOOTSTRAP_N_SAMPLES,
+                        'bootstrap_seed': BOOTSTRAP_RANDOM_SEED,
                         'values': frame_accs
                     })
                     frame_label = f"Frame 0 (initial)" if frame_idx == 0 else f"Frame {frame_idx}"
-                    print(f"  {frame_label}: {mean_frame_acc:.3f} ± {std_frame_acc:.3f}")
+                    print(f"  {frame_label}: {mf:.3f} [{flo:.3f}, {fhi:.3f}]")
                 else:
                     all_frame_accuracies.append(None)
         else:
             mean_overall_accuracy = None
-            std_overall_accuracy = None
+            oa_lo, oa_hi = None, None
             all_frame_accuracies = None
             total_frames = 0
             num_tracking_frames = 0
@@ -956,7 +970,10 @@ def run_experiment_for_scene_texture(scene, texture):
             'texture': texture,
             'num_runs': NUM_RUNS,
             'mean_overall_accuracy': mean_overall_accuracy,
-            'std_overall_accuracy': std_overall_accuracy,
+            'overall_accuracy_ci95_low': oa_lo if len(run_overall_accuracies) > 0 else None,
+            'overall_accuracy_ci95_high': oa_hi if len(run_overall_accuracies) > 0 else None,
+            'bootstrap_n': BOOTSTRAP_N_SAMPLES,
+            'bootstrap_seed': BOOTSTRAP_RANDOM_SEED,
             'frame_accuracies_aggregated': all_frame_accuracies,
             'individual_runs': [
                 {
@@ -985,7 +1002,8 @@ def run_experiment_for_scene_texture(scene, texture):
             'scene': scene,
             'texture': texture,
             'mean_overall_accuracy': mean_overall_accuracy,
-            'std_overall_accuracy': std_overall_accuracy,
+            'overall_accuracy_ci95_low': oa_lo if len(run_overall_accuracies) > 0 else None,
+            'overall_accuracy_ci95_high': oa_hi if len(run_overall_accuracies) > 0 else None,
             'success': True
         }
 

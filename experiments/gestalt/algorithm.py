@@ -14,15 +14,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import config
 
-from genparticles.datatypes import *
-from genparticles.model_3d import *
-from genparticles.inference import *
-from genparticles.dataloader import *
-from genparticles.utils import *
-from genparticles.evaluation import *
+from genmatter.datatypes import *
+from genmatter.model_3d import *
+from genmatter.inference import *
+from genmatter.dataloader import *
+from genmatter.utils import *
+from genmatter.evaluation import *
 
-model_jsimulate = jax.jit(HDGMM_model_3d.simulate)
-model_jimportance = jax.jit(HDGMM_model_3d.importance)
+model_jsimulate = jax.jit(GenMatter_model_3d.simulate)
+model_jimportance = jax.jit(GenMatter_model_3d.importance)
 
 ######################################################
 ## CONFIGURATION START
@@ -325,7 +325,7 @@ def extract_gestalt_segmentation(depth_sq, flow_sq, points_3d):
     return final_mask
 
 def run_gestalt_experiment(scene, texture, hyperparams, experiment_name):
-    """Run HDGMM experiment on gestalt data - algorithm only, no visualization"""
+    """Run GenMatter experiment on gestalt data - algorithm only, no visualization"""
     print(f"\nRunning experiment for {scene}_{texture}")
     
     # Load data
@@ -355,7 +355,7 @@ def run_gestalt_experiment(scene, texture, hyperparams, experiment_name):
     combined_mask = first_frame_seg & motion_valid_mask[0]
     print(f"Combined mask: {np.sum(combined_mask)}/{len(combined_mask)} points ({100*np.sum(combined_mask)/len(combined_mask):.1f}%) pass both ROI and motion magnitude filters")
 
-    # Prepare data for HDGMM
+    # Prepare data for GenMatter
     tracked_points = points_3d
     tracked_motion_vectors = motion_3d
     
@@ -407,7 +407,7 @@ def run_gestalt_experiment(scene, texture, hyperparams, experiment_name):
     #
     # Gamma(shape, rate) models outlier velocity magnitude ||v||
     # Enable model-based outlier detection with higher probability
-    hypers = HDGMM_Hyperparams.create(
+    hypers = GenMatter_Hyperparams.create(
         outlier_prob=f_(0.001),
         outlier_velocity_gamma_shape=f_(7.5),  # Shape parameter for Gamma distribution over ||v||
         outlier_velocity_gamma_rate=f_(0.5),  # Rate: mean=1.0, favors velocities around 1.0
@@ -445,18 +445,18 @@ def run_gestalt_experiment(scene, texture, hyperparams, experiment_name):
         # Initialize model
         key, key_importance = jax.random.split(key)
         init_tr, _ = model_jimportance(key_importance, kmeans_chm, (hypers,))
-        init_hdgmm_state = init_tr.get_retval()
+        init_genmatter_state = init_tr.get_retval()
 
         # Run initial Gibbs sweeps (increased burn-in iterations for better convergence)
         key, init_gibbs_key = jax.random.split(key)
-        gibbs_wtrs = hdgmm_full_gibbs(init_gibbs_key, init_hdgmm_state, 500, GIBBS_DIALS, use_weighted_blobs=True, num_gibbs_inner_loops=5)
+        gibbs_wtrs = genmatter_full_gibbs(init_gibbs_key, init_genmatter_state, 500, GIBBS_DIALS, use_weighted_blobs=True, num_gibbs_inner_loops=5)
 
         # Get final state
-        init_hdgmm_state = gibbs_wtrs[-1].retval
+        init_genmatter_state = gibbs_wtrs[-1].retval
         
         # Run tracking
         key, tracking_key = jax.random.split(key)
-        tracking_wtrs = hdgmm_tracking_gibbs(tracking_key, init_hdgmm_state, tracked_points, tracked_motion_vectors)
+        tracking_wtrs = genmatter_tracking_gibbs(tracking_key, init_genmatter_state, tracked_points, tracked_motion_vectors)
 
         # Extract tracking data (hard threshold outlier rejection disabled)
         tracking_data = []

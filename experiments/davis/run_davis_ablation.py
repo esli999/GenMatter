@@ -1,5 +1,4 @@
-# HDGMM Tracking with DINO Features - Batch Processing
-# Clean implementation for running experiments on multiple videos
+# GenMatter Tracking with DINO Features - Batch Processing
 
 import os
 import json
@@ -32,12 +31,17 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 import config
 
-from genparticles.datatypes import *
-from genparticles.model_3d import *
-from genparticles.inference import *
-from genparticles.dataloader import *
-from genparticles.utils import *
-from genparticles.evaluation import *
+from genmatter.datatypes import *
+from genmatter.model_3d import *
+from genmatter.inference import *
+from genmatter.dataloader import *
+from genmatter.utils import *
+from genmatter.evaluation import *
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
 
 import genjax
 from genjax import Const, gen, Pytree
@@ -53,6 +57,8 @@ VIDEO_NAMES = list(config.TAPVID_DAVIS_VIDEO_NAMES)
 
 NUM_INIT_PARTICLES_ON_MASK = None
 USE_SAM_FRAME0 = True
+SAVE_3WIDE_VIDEO = False  # overridden by davis_run_cli when run as __main__
+SKIP_COMPLETED = False  # overwritten by davis_run_cli.configure_experiment_module
 
 # Paths
 DAVIS_3D_MOTION_PATH = str(config.DAVIS_3D_MOTION_PATH)
@@ -61,12 +67,13 @@ DAVIS_RGB_PATH = str(config.DAVIS_RGB_PATH)
 DINO_PATH_TEMPLATE = str(config.DAVIS_DINO_PATH / '{}_dino_pca_per_pixel.npz')
 SAM_FRAME0_PATH_TEMPLATE = str(config.DAVIS_SAM_FRAME0_PATH / '{}_SAM_frame0.png')
 
-# Output directory
-EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_OUTPUT_DIR)
+# Output directory (overridden by davis_run_cli from --gt-init)
+EXPERIMENT_SAVE_DIR = str(config.DAVIS_ABLATION_OUTPUT_DIR_SAM)
 
 # Model hyperparameters
 NUM_BLOBS = 500
-NUM_HYPERBLOBS_ORIGINAL = 1  # Ablation: 1 cluster (no clustering effect)
+NUM_HYPERBLOBS_ORIGINAL = 9
+# NUM_HYPERBLOBS_ORIGINAL = 1
 FOCAL_LENGTH = 520.0
 BLOB_COUNTING_THRESHOLD = 0
 RANDOM_SEED = 42
@@ -76,7 +83,7 @@ RANDOM_SEED = 42
 # ============================================================================
 
 @Pytree.dataclass
-class HDGMM_Hyperparams_DINO(Super_Pytree):
+class GenMatter_Hyperparams_DINO(Super_Pytree):
     outlier_prob: jnp.float32 = Super_Pytree.field()
     outlier_velocity_gamma_shape: jnp.float32 = Super_Pytree.field()
     outlier_velocity_gamma_rate: jnp.float32 = Super_Pytree.field()
@@ -117,10 +124,10 @@ class HDGMM_Hyperparams_DINO(Super_Pytree):
 
     @classmethod
     def create(cls, **kwargs):
-        return HDGMM_Hyperparams.create.__func__(cls, **kwargs)
+        return GenMatter_Hyperparams.create.__func__(cls, **kwargs)
 
 @Pytree.dataclass
-class HDGMM_Blobs_State_DINO(Super_Pytree):
+class GenMatter_Blobs_State_DINO(Super_Pytree):
     hyperblob_assignments: jnp.ndarray
     blob_weights: jnp.ndarray
     blob_means: jnp.ndarray
@@ -130,25 +137,25 @@ class HDGMM_Blobs_State_DINO(Super_Pytree):
     blob_features: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_Datapoints_State_DINO(Super_Pytree):
+class GenMatter_Datapoints_State_DINO(Super_Pytree):
     blob_assignments: jnp.ndarray
     datapoint_positions: jnp.ndarray
     datapoint_vels: jnp.ndarray
     datapoint_features: jnp.ndarray
 
 @Pytree.dataclass
-class HDGMM_State_DINO(Super_Pytree):
-    hypers: HDGMM_Hyperparams_DINO
-    hyperblobs_state: HDGMM_Hyperblobs_State
-    blobs_state: HDGMM_Blobs_State_DINO
-    datapoints_state: HDGMM_Datapoints_State_DINO
+class GenMatter_State_DINO(Super_Pytree):
+    hypers: GenMatter_Hyperparams_DINO
+    hyperblobs_state: GenMatter_Hyperblobs_State
+    blobs_state: GenMatter_Blobs_State_DINO
+    datapoints_state: GenMatter_Datapoints_State_DINO
 
 @gen
-def HDGMM_model_dino(hypers: HDGMM_Hyperparams_DINO):
-    hyperblobs_state = HDGMM_hyperblobs_model(hypers) @ 'hyperblobs'
-    blobs_state = HDGMM_blobs_model_dino(hypers, hyperblobs_state) @ 'blobs'
-    datapoints_state = HDGMM_datapoints_model_dino(hypers, blobs_state) @ 'datapoints'
-    return HDGMM_State_DINO(
+def GenMatter_model_dino(hypers: GenMatter_Hyperparams_DINO):
+    hyperblobs_state = GenMatter_hyperblobs_model(hypers) @ 'hyperblobs'
+    blobs_state = GenMatter_blobs_model_dino(hypers, hyperblobs_state) @ 'blobs'
+    datapoints_state = GenMatter_datapoints_model_dino(hypers, blobs_state) @ 'datapoints'
+    return GenMatter_State_DINO(
         hypers=hypers,
         hyperblobs_state=hyperblobs_state,
         blobs_state=blobs_state,
@@ -156,7 +163,7 @@ def HDGMM_model_dino(hypers: HDGMM_Hyperparams_DINO):
     )
 
 @gen
-def HDGMM_blobs_model_dino(hypers: HDGMM_Hyperparams_DINO, hyperblobs_state: HDGMM_Hyperblobs_State):
+def GenMatter_blobs_model_dino(hypers: GenMatter_Hyperparams_DINO, hyperblobs_state: GenMatter_Hyperblobs_State):
     sample_shape = Const((hypers.n_blobs,))
     hyperblob_assignments = genjax.categorical(
         probs=hyperblobs_state.hyperblob_weights,
@@ -177,7 +184,7 @@ def HDGMM_blobs_model_dino(hypers: HDGMM_Hyperparams_DINO, hyperblobs_state: HDG
     blob_vel_means = genjax.normal(blob_vel_means_, jnp.sqrt(hypers.sigma_V)) @ 'blob_vel_means'
     blob_vel_covs = inverse_wishart(hypers.nu_V, hypers.Psi_V, sample_shape=sample_shape) @ 'blob_vel_covs'
     blob_features = genjax.normal(hypers.mu_F, jnp.sqrt(hypers.sigma_F_prior**2)) @ 'blob_features'
-    return HDGMM_Blobs_State_DINO(
+    return GenMatter_Blobs_State_DINO(
         hyperblob_assignments=hyperblob_assignments,
         blob_weights=blob_weights,
         blob_means=blob_means,
@@ -188,7 +195,7 @@ def HDGMM_blobs_model_dino(hypers: HDGMM_Hyperparams_DINO, hyperblobs_state: HDG
     )
 
 @gen
-def HDGMM_datapoints_model_dino(hypers: HDGMM_Hyperparams_DINO, blobs_state: HDGMM_Blobs_State_DINO):
+def GenMatter_datapoints_model_dino(hypers: GenMatter_Hyperparams_DINO, blobs_state: GenMatter_Blobs_State_DINO):
     blob_assignments = genjax.categorical(
         probs=blobs_state.blob_weights,
         sample_shape=Const((hypers.n_datapoints,))
@@ -206,7 +213,7 @@ def HDGMM_datapoints_model_dino(hypers: HDGMM_Hyperparams_DINO, blobs_state: HDG
         assigned_blob_per_datapoint.blob_features,
         jnp.sqrt(hypers.sigma_F)
     ) @ 'datapoint_features'
-    return HDGMM_Datapoints_State_DINO(
+    return GenMatter_Datapoints_State_DINO(
         blob_assignments=blob_assignments,
         datapoint_positions=datapoint_positions,
         datapoint_vels=datapoint_vels,
@@ -214,15 +221,15 @@ def HDGMM_datapoints_model_dino(hypers: HDGMM_Hyperparams_DINO, blobs_state: HDG
     )
 
 @gen
-def blob_datapoint_likelihood_model_dino(blob_state: HDGMM_Blobs_State_DINO, sigma_F: jnp.float32):
+def blob_datapoint_likelihood_model_dino(blob_state: GenMatter_Blobs_State_DINO, sigma_F: jnp.float32):
     datapoint_position = genjax.mv_normal(blob_state.blob_means, blob_state.blob_covs) @ 'datapoint_position'
     datapoint_vel = genjax.mv_normal(blob_state.blob_vel_means, blob_state.blob_vel_covs) @ 'datapoint_vel'
     datapoint_feature = genjax.normal(blob_state.blob_features, jnp.sqrt(sigma_F)) @ 'datapoint_feature'
     return None
 
 # JIT compile
-model_jsimulate = jax.jit(HDGMM_model_dino.simulate)
-model_jimportance = jax.jit(HDGMM_model_dino.importance)
+model_jsimulate = jax.jit(GenMatter_model_dino.simulate)
+model_jimportance = jax.jit(GenMatter_model_dino.importance)
 
 # ============================================================================
 # Helper Functions
@@ -333,15 +340,15 @@ def initialize_model_with_dino(tracked_points, num_blobs, num_hyperblobs,
 # Inference Functions
 # ============================================================================
 
-def gibbs_blob_features_dino(key, hdgmm_state):
+def gibbs_blob_features_dino(key, genmatter_state):
     """Gibbs update for blob DINO features."""
     posterior_key, _ = jax.random.split(key)
-    datapoint_features = hdgmm_state.datapoints_state.datapoint_features
-    blob_assignments = hdgmm_state.datapoints_state.blob_assignments
-    mu_F = hdgmm_state.hypers.mu_F
-    sigma_F_prior = hdgmm_state.hypers.sigma_F_prior
-    sigma_F = hdgmm_state.hypers.sigma_F
-    L = hdgmm_state.hypers.n_blobs
+    datapoint_features = genmatter_state.datapoints_state.datapoint_features
+    blob_assignments = genmatter_state.datapoints_state.blob_assignments
+    mu_F = genmatter_state.hypers.mu_F
+    sigma_F_prior = genmatter_state.hypers.sigma_F_prior
+    sigma_F = genmatter_state.hypers.sigma_F
+    L = genmatter_state.hypers.n_blobs
 
     N_l = jax.ops.segment_sum(jnp.ones(datapoint_features.shape[0]), blob_assignments, num_segments=L)
     S_l = stable_segment_sum(datapoint_features, blob_assignments, L)
@@ -355,10 +362,10 @@ def gibbs_blob_features_dino(key, hdgmm_state):
     posterior_mean = jnp.where(has_points[:, None], posterior_mean, mu_F[None, :])
     posterior_std = jnp.where(has_points[:, None], posterior_std, sigma_F_prior[None, :])
     new_blob_features = genjax.normal.sample(posterior_key, posterior_mean, posterior_std)
-    return hdgmm_state.replace({'blobs_state': {'blob_features': new_blob_features}})
+    return genmatter_state.replace({'blobs_state': {'blob_features': new_blob_features}})
 
 @jax.jit
-def dense_eval_blob_assignments(key, hdgmm_state, dense_positions, dense_vels, dense_features,
+def dense_eval_blob_assignments(key, genmatter_state, dense_positions, dense_vels, dense_features,
                                 disable_outlier_prob=False):
     """Dense evaluation of blob assignments."""
     from genjax import ChoiceMapBuilder as C
@@ -366,13 +373,13 @@ def dense_eval_blob_assignments(key, hdgmm_state, dense_positions, dense_vels, d
     posterior_key, _ = jax.random.split(key)
     batch_size = 975
 
-    hypers = hdgmm_state.hypers
+    hypers = genmatter_state.hypers
     num_blobs = hypers.n_blobs
     num_datapoints = dense_positions.shape[0]
     datapoint_positions = dense_positions
     datapoint_vels = dense_vels
     datapoint_features = dense_features
-    blobs_state = hdgmm_state.blobs_state
+    blobs_state = genmatter_state.blobs_state
 
     blob_weights = blobs_state.blob_weights
     outlier_prob = jnp.where(disable_outlier_prob, 0.0, hypers.outlier_prob)
@@ -423,12 +430,12 @@ def dense_eval_blob_assignments(key, hdgmm_state, dense_positions, dense_vels, d
     return dense_eval_assignments
 
 @jax.jit
-def dense_eval_blob_weights(key, hdgmm_state : HDGMM_State, dense_assignments : jnp.ndarray): 
+def dense_eval_blob_weights(key, genmatter_state : GenMatter_State, dense_assignments : jnp.ndarray): 
     posterior_key, _ = jax.random.split(key)
 
     # Get the data and parameters from the trace
-    num_blobs = hdgmm_state.hypers.n_blobs
-    prior_beta = hdgmm_state.hypers.beta
+    num_blobs = genmatter_state.hypers.n_blobs
+    prior_beta = genmatter_state.hypers.beta
     blob_idxs = dense_assignments  # [N]
 
     # Compute counts via segment_sum
@@ -446,7 +453,7 @@ def dense_eval_blob_weights(key, hdgmm_state : HDGMM_State, dense_assignments : 
 
     return new_blob_weights
 
-def gibbs_blob_assignments_dino(key, hdgmm_state, position_only=False,
+def gibbs_blob_assignments_dino(key, genmatter_state, position_only=False,
                                 velocity_only=False, disable_outlier_prob=False, feature_only=False):
     """Gibbs update for blob assignments with DINO feature likelihood."""
     from genjax import ChoiceMapBuilder as C
@@ -454,13 +461,13 @@ def gibbs_blob_assignments_dino(key, hdgmm_state, position_only=False,
     posterior_key, _ = jax.random.split(key)
     batch_size = 975
 
-    hypers = hdgmm_state.hypers
+    hypers = genmatter_state.hypers
     num_blobs = hypers.n_blobs
     num_datapoints = hypers.n_datapoints
-    datapoint_positions = hdgmm_state.datapoints_state.datapoint_positions
-    datapoint_vels = hdgmm_state.datapoints_state.datapoint_vels
-    datapoint_features = hdgmm_state.datapoints_state.datapoint_features
-    blobs_state = hdgmm_state.blobs_state
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    datapoint_features = genmatter_state.datapoints_state.datapoint_features
+    blobs_state = genmatter_state.blobs_state
 
     gibbs_blob_vel_covs = jnp.where(
         jnp.logical_or(position_only, feature_only),
@@ -523,95 +530,91 @@ def gibbs_blob_assignments_dino(key, hdgmm_state, position_only=False,
     all_logprobs = batched_logprobs.reshape(num_full_batches * batch_size, -1)
     updated_assignments = genjax.categorical.sample(posterior_key, logits=all_logprobs)
 
-    return hdgmm_state.replace({
+    return genmatter_state.replace({
         'datapoints_state': {'blob_assignments': updated_assignments}
     })
 
-def blob_tracking_gibbs_dino(key, hdgmm_state):
+def blob_tracking_gibbs_dino(key, genmatter_state):
     """Single-frame Gibbs updates."""
     def update_blob_assignments_position_only(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_dino(
-            gibbs_key, hdgmm_state, position_only=True, disable_outlier_prob=True
+        genmatter_state = gibbs_blob_assignments_dino(
+            gibbs_key, genmatter_state, position_only=True, disable_outlier_prob=True
         )
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_assignments_with_outlier(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_dino(
-            gibbs_key, hdgmm_state, position_only=True, disable_outlier_prob=False
+        genmatter_state = gibbs_blob_assignments_dino(
+            gibbs_key, genmatter_state, position_only=True, disable_outlier_prob=False
         )
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_velocities(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_means(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_velocity_covariances(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_covs(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_vel_covs(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_means(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_means(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def update_blob_features_dino(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_features_dino(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_blob_features_dino(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
     def hyperblob_update_loop(i, carry):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_rot(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_hyperblob_rot(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_hyperblob_trans(gibbs_key, hdgmm_state)
-        return key, hdgmm_state
+        genmatter_state = gibbs_hyperblob_trans(gibbs_key, genmatter_state)
+        return key, genmatter_state
 
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, hdgmm_state))
-    # # added this to see if it helps below
-    # key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_assignments_feature_only, (key, hdgmm_state))
-    # # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    key, hdgmm_state = jax.lax.fori_loop(0, 1, update_blob_assignments_position_only, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 15, update_blob_means, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 1, update_blob_assignments_with_outlier, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 15, update_blob_velocities, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 15, update_blob_velocity_covariances, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, hdgmm_state))
-    key, hdgmm_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, hdgmm_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_position_only, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_means, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_with_outlier, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocities, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocity_covariances, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 3, hyperblob_update_loop, (key, genmatter_state))
 
-    
-    return hdgmm_state
+    return genmatter_state
 
-def hdgmm_tracking_gibbs_dino(key, init_hdgmm_state, tracked_points,
+def genmatter_tracking_gibbs_dino(key, init_genmatter_state, tracked_points,
                               tracked_motion_vectors, tracked_features, outlier_prob):
     """Track over time with DINO features."""
-    init_hdgmm_state = init_hdgmm_state.replace({'hypers': {'outlier_prob': f_(outlier_prob)}})
+    init_genmatter_state = init_genmatter_state.replace({'hypers': {'outlier_prob': f_(outlier_prob)}})
 
     @jax.jit
     def f_tracking_sweep(carry, timestep_idx):
-        key, hdgmm_state, tracked_points, tracked_motion_vectors, tracked_features = carry
-        next_blob_means = hdgmm_state.blobs_state.blob_vel_means + hdgmm_state.blobs_state.blob_means
-        hdgmm_state = hdgmm_state.replace({'blobs_state': {'blob_means': next_blob_means}})
-        hdgmm_state = hdgmm_state.replace({
+        key, genmatter_state, tracked_points, tracked_motion_vectors, tracked_features = carry
+        next_blob_means = genmatter_state.blobs_state.blob_vel_means + genmatter_state.blobs_state.blob_means
+        genmatter_state = genmatter_state.replace({'blobs_state': {'blob_means': next_blob_means}})
+        genmatter_state = genmatter_state.replace({
             'datapoints_state': {
                 'datapoint_positions': tracked_points[timestep_idx],
                 'datapoint_vels': tracked_motion_vectors[timestep_idx],
@@ -619,299 +622,54 @@ def hdgmm_tracking_gibbs_dino(key, init_hdgmm_state, tracked_points,
             }
         })
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = blob_tracking_gibbs_dino(gibbs_key, hdgmm_state)
-        return (key, hdgmm_state, tracked_points, tracked_motion_vectors, tracked_features), \
-               hdgmm_TraceWrapper(force_retval=hdgmm_state)
+        genmatter_state = blob_tracking_gibbs_dino(gibbs_key, genmatter_state)
+        return (key, genmatter_state, tracked_points, tracked_motion_vectors, tracked_features), \
+               genmatter_TraceWrapper(force_retval=genmatter_state)
 
     timestep_indices = jnp.arange(1, len(tracked_points))
-    _, stacked_hdgmm_wtrs = jax.lax.scan(
+    _, stacked_genmatter_wtrs = jax.lax.scan(
         f_tracking_sweep,
-        (key, init_hdgmm_state, tracked_points, tracked_motion_vectors, tracked_features),
+        (key, init_genmatter_state, tracked_points, tracked_motion_vectors, tracked_features),
         timestep_indices,
         unroll=1
     )
 
-    return HDGMM_Gibbs_TraceWrapper(
-        hdgmm_TraceWrapper(force_retval=init_hdgmm_state),
-        stacked_hdgmm_wtrs
+    return GenMatter_Gibbs_TraceWrapper(
+        genmatter_TraceWrapper(force_retval=init_genmatter_state),
+        stacked_genmatter_wtrs
     )
 
-def init_gibbs_sweep_dino(key, hdgmm_state, num_sweeps=30):
+def init_gibbs_sweep_dino(key, genmatter_state, num_sweeps=30):
     """Custom Gibbs sweeps for DINO initialization."""
     def gibbs_iteration(carry, i):
-        key, hdgmm_state = carry
+        key, genmatter_state = carry
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_assignments_dino(gibbs_key, hdgmm_state, position_only=True, disable_outlier_prob=True)
+        genmatter_state = gibbs_blob_assignments_dino(gibbs_key, genmatter_state, position_only=True, disable_outlier_prob=True)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_weights(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_weights(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_means(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_vel_means(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_vel_covs(gibbs_key, hdgmm_state)
+        genmatter_state = gibbs_blob_vel_covs(gibbs_key, genmatter_state)
         key, gibbs_key = jax.random.split(key)
-        hdgmm_state = gibbs_blob_features_dino(gibbs_key, hdgmm_state)
-        return (key, hdgmm_state), hdgmm_TraceWrapper(force_retval=hdgmm_state)
+        genmatter_state = gibbs_blob_features_dino(gibbs_key, genmatter_state)
+        return (key, genmatter_state), genmatter_TraceWrapper(force_retval=genmatter_state)
 
-    (key, final_state), traces = jax.lax.scan(gibbs_iteration, (key, hdgmm_state), jnp.arange(num_sweeps))
-    return HDGMM_Gibbs_TraceWrapper(hdgmm_TraceWrapper(force_retval=hdgmm_state), traces)
+    (key, final_state), traces = jax.lax.scan(gibbs_iteration, (key, genmatter_state), jnp.arange(num_sweeps))
+    return GenMatter_Gibbs_TraceWrapper(genmatter_TraceWrapper(force_retval=genmatter_state), traces)
 
 # ============================================================================
 # Evaluation Functions
 # ============================================================================
 #
-# IMPORTANT: Four different metrics are computed:
-#
-# 1. PARTICLE-BASED METRICS (compute_error_rates) - PRIMARY METRIC
-#    - Tracks discrete particle/blob location changes over time
-#    - Projects particle means to 2D and checks if they fall within GT mask
-#    - Identifies object vs background particles in frame 0
-#    - FN Rate: % of object particles that left the GT mask
-#    - FP Rate: % of background particles that entered the GT mask
-#    - Jaccard: Intersection over Union of particle sets
-#    - Accuracy: (TN + TP) / (TP + TN + FP + FN)
-#    - These are the metrics saved to JSON and reported in summaries
-#
-# 2. PARTICLE-COUNT UNWEIGHTED METRICS (evaluate_single_davis_video)
-#    - Counts particles with equal weight (1.0 per particle)
-#    - Particle membership determined by FRACTIONAL proportion of pixels in GT mask
-#    - Each particle contributes fractionally: if 70% of pixels in GT, contributes 0.7 to object count
-#    - Standard recall/precision/F1/Jaccard computed on fractional particle counts
-#    - Used for comparison with traditional segmentation methods
-#
-# 3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (evaluate_single_davis_video)
-#    - Counts particles weighted by (pixel_count × blob_weight) per frame
-#    - Particle membership determined by FRACTIONAL proportion of pixels in GT mask
-#    - Each particle contributes: (proportion_in_GT × pixel_count × blob_weight) to object count
-#    - Recall/Precision/F1/Jaccard calculated on weighted fractional particle counts with adaptive weights
-#    - Shows benefit of probabilistic representation
-#
-# 4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (evaluate_single_davis_video)
-#    - Counts particles weighted by (pixel_count × blob_weight) from frame 0
-#    - Particle membership determined by FRACTIONAL proportion of pixels in GT mask
-#    - Each particle contributes: (proportion_in_GT × pixel_count × blob_weight) to object count
-#    - Recall/Precision/F1/Jaccard calculated on weighted fractional particle counts with fixed weights
-#    - Fair comparison with point trackers that don't adapt weights
-#
-# The particle-based metrics are what we care about for tracking evaluation.
+# Primary comparison metric: matter-weighted recall, precision, and Jaccard with
+# frame-0 blob weights (evaluate_single_davis_video).
 # ============================================================================
 
-def compute_error_rates(tracking_data, segmentation_masks, img_dims,
-                       blob_counting_threshold=0, focal_length=520.0, force_below_count_thresh_as_outlier=False,
-                       subsampled_indices=None, is_mask_subsampled=False):
-    """
-    Compute PARTICLE-BASED false positive, false negative rates, Jaccard score, and accuracy over time.
-
-    This tracks discrete particle location changes by projecting particle means to 2D,
-    NOT fractional particle contributions. See section comment above for the difference between 
-    particle-based and particle-count metrics.
-    
-    Object particles are determined SOLELY by whether they project onto mask pixels in frame 0,
-    NOT by hyperblob assignment.
-    
-    Args:
-        force_below_count_thresh_as_outlier: If True, particles below counting threshold are 
-                                           treated as outliers and excluded from all metrics.
-                                           If False (default), they are treated as background particles.
-    """
-    fx = fy = focal_length
-    cx = img_dims[1] / 2.0
-    cy = img_dims[0] / 2.0
-
-    # Frame 0 setup
-    frame0 = tracking_data[0]
-    blob_assignments_frame0 = frame0['blob_assignments']
-    blob_means_frame0 = frame0['blob_means']
-    n_blobs_frame0 = frame0['n_blobs']
-    gt_mask_frame0 = segmentation_masks[0]
-
-    blob_pixel_counts_frame0 = np.bincount(
-        blob_assignments_frame0[blob_assignments_frame0 < n_blobs_frame0],
-        minlength=n_blobs_frame0
-    )
-    significant_blobs = np.where(blob_pixel_counts_frame0 >= blob_counting_threshold)[0]
-
-    if force_below_count_thresh_as_outlier:
-        # Only consider significant blobs, ignore below-threshold particles entirely
-        blobs_to_consider = significant_blobs
-    else:
-        # Original behavior: consider all blobs
-        blobs_to_consider = np.arange(n_blobs_frame0)
-
-    print(f"is_mask_subsampled? ~~~~~~~~~~~> : {is_mask_subsampled}")
-
-    if is_mask_subsampled:
-        H, W = img_dims
-        xs_sub = np.array(subsampled_indices) % W
-        ys_sub = np.array(subsampled_indices) // W
-        # helper to get nearest sampled mask value from a projected (x, y)
-        def nearest_sampled_mask_value(mask_vec, x, y):
-            # compute index in the sliced mask (aligned with subsampled_indices order)
-            dx = xs_sub - x
-            dy = ys_sub - y
-            idx = int(np.argmin(dx * dx + dy * dy))
-            return bool(mask_vec[idx])
-
-    # Project blob means to 2D and determine object vs background particles based on mask
-    x_2d = (blob_means_frame0[:, 0] / (blob_means_frame0[:, 2] + 1e-8)) * fx + cx
-    y_2d = (blob_means_frame0[:, 1] / (blob_means_frame0[:, 2] + 1e-8)) * fy + cy
-    x_2d = np.clip(x_2d.astype(int), 0, img_dims[1] - 1)
-    y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
-
-    object_blobs_frame0 = []
-    background_blobs_frame0 = []
-
-    for blob_idx in blobs_to_consider:
-        if not is_mask_subsampled:
-            pixel_idx = y_2d[blob_idx] * img_dims[1] + x_2d[blob_idx]
-            is_on_mask = pixel_idx < len(gt_mask_frame0) and gt_mask_frame0[pixel_idx]
-        else:
-            is_on_mask = nearest_sampled_mask_value(gt_mask_frame0, x_2d[blob_idx], y_2d[blob_idx])
-        
-        if is_on_mask:
-            object_blobs_frame0.append(blob_idx)
-        else:
-            background_blobs_frame0.append(blob_idx)
-
-    object_blobs_frame0 = np.array(object_blobs_frame0)
-    background_blobs_frame0 = np.array(background_blobs_frame0)
-    n_object_blobs = len(object_blobs_frame0)
-    n_background_blobs = len(background_blobs_frame0)
-
-    # Track over time
-    false_negative_rates = []
-    false_positive_rates = []
-    jaccard_scores = []
-    accuracies = []
-
-    for frame_idx in range(len(tracking_data)):
-        frame = tracking_data[frame_idx]
-        blob_means = frame['blob_means']
-        n_blobs = frame['n_blobs']
-        gt_mask = segmentation_masks[frame_idx]
-
-        if not is_mask_subsampled:
-            x_2d = (blob_means[:, 0] / (blob_means[:, 2] + 1e-8)) * fx + cx
-            y_2d = (blob_means[:, 1] / (blob_means[:, 2] + 1e-8)) * fy + cy
-            x_2d = np.clip(x_2d.astype(int), 0, img_dims[1] - 1)
-            y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
-            pixel_indices = y_2d * img_dims[1] + x_2d
-
-        tp_count = 0
-        if not is_mask_subsampled:
-            for blob_idx in object_blobs_frame0:
-                if blob_idx < n_blobs:
-                    pixel_idx = pixel_indices[blob_idx]
-                    if pixel_idx < len(gt_mask) and gt_mask[pixel_idx]:
-                        tp_count += 1
-        else:
-            for blob_idx in object_blobs_frame0:
-                if blob_idx < n_blobs:
-                    if nearest_sampled_mask_value(gt_mask, x_2d[blob_idx], y_2d[blob_idx]):
-                        tp_count += 1
-
-        fn_count = n_object_blobs - tp_count
-        fn_rate = (fn_count / n_object_blobs) * 100 if n_object_blobs > 0 else 0.0
-
-        fp_count = 0
-        if not is_mask_subsampled:
-            for blob_idx in background_blobs_frame0:
-                if blob_idx < n_blobs:
-                    pixel_idx = pixel_indices[blob_idx]
-                    if pixel_idx < len(gt_mask) and gt_mask[pixel_idx]:
-                        fp_count += 1
-        else:
-            for blob_idx in background_blobs_frame0:
-                if blob_idx < n_blobs:
-                    if nearest_sampled_mask_value(gt_mask, x_2d[blob_idx], y_2d[blob_idx]):
-                        fp_count += 1
-
-        fp_rate = (fp_count / n_background_blobs) * 100 if n_background_blobs > 0 else 0.0
-
-        # True negatives: background particles that stayed off mask
-        tn_count = n_background_blobs - fp_count
-
-        # Compute accuracy: (TN + TP) / (TP + TN + FP + FN)
-        total_particles = n_object_blobs + n_background_blobs
-        accuracy = ((tn_count + tp_count) / total_particles) * 100 if total_particles > 0 else 100.0
-
-        # Compute Jaccard score (IoU for particles)
-        # True positives: object particles still on mask
-        # False positives: background particles that entered mask
-        # False negatives: object particles that left mask
-        intersection = tp_count
-        union = tp_count + fp_count + fn_count
-        jaccard = (intersection / union) if union > 0 else 1.0  # Perfect score if no particles
-
-        false_negative_rates.append(fn_rate)
-        false_positive_rates.append(fp_rate)
-        jaccard_scores.append(jaccard)
-        accuracies.append(accuracy)
-
-    return {
-        'false_negative_rates': false_negative_rates,
-        'false_positive_rates': false_positive_rates,
-        'jaccard_scores': jaccard_scores,
-        'accuracies': accuracies,
-        'mean_fn_rate': np.mean(false_negative_rates),
-        'mean_fp_rate': np.mean(false_positive_rates),
-        'mean_jaccard': np.mean(jaccard_scores),
-        'mean_accuracy': np.mean(accuracies),
-        'n_object_blobs': n_object_blobs,
-        'n_background_blobs': n_background_blobs
-    }
-
-def plot_error_rates(error_results, video_name, save_path):
-    """Plot and save error rate visualization."""
-    fn_rates = error_results['false_negative_rates']
-    fp_rates = error_results['false_positive_rates']
-    jaccard_scores = error_results['jaccard_scores']
-    accuracies = error_results['accuracies']
-    mean_fn = error_results['mean_fn_rate']
-    mean_fp = error_results['mean_fp_rate']
-    mean_jaccard = error_results['mean_jaccard']
-    mean_accuracy = error_results['mean_accuracy']
-
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 15))
-    
-    # Top plot: Error rates
-    ax1.plot(range(len(fn_rates)), fn_rates, linewidth=2, color='red',
-            label=f'False Negative Rate (mean: {mean_fn:.2f}%)', alpha=0.8)
-    ax1.plot(range(len(fp_rates)), fp_rates, linewidth=2, color='blue',
-            label=f'False Positive Rate (mean: {mean_fp:.2f}%)', alpha=0.8)
-    ax1.set_xlabel('Frame', fontsize=12)
-    ax1.set_ylabel('Rate (%)', fontsize=12)
-    ax1.set_title(f'{video_name} - Blob Tracking Error Rates', fontsize=14, fontweight='bold')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend(fontsize=11)
-    ax1.set_ylim([0, 105])
-    
-    # Middle plot: Jaccard score
-    ax2.plot(range(len(jaccard_scores)), jaccard_scores, linewidth=2, color='green',
-            label=f'Jaccard Score (mean: {mean_jaccard:.3f})', alpha=0.8)
-    ax2.set_xlabel('Frame', fontsize=12)
-    ax2.set_ylabel('Jaccard Score', fontsize=12)
-    ax2.set_title(f'{video_name} - Particle Jaccard Score (IoU)', fontsize=14, fontweight='bold')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend(fontsize=11)
-    ax2.set_ylim([0, 1.05])
-    
-    # Bottom plot: Accuracy
-    ax3.plot(range(len(accuracies)), accuracies, linewidth=2, color='purple',
-            label=f'Accuracy (mean: {mean_accuracy:.2f}%)', alpha=0.8)
-    ax3.set_xlabel('Frame', fontsize=12)
-    ax3.set_ylabel('Accuracy (%)', fontsize=12)
-    ax3.set_title(f'{video_name} - Particle Tracking Accuracy', fontsize=14, fontweight='bold')
-    ax3.grid(True, alpha=0.3)
-    ax3.legend(fontsize=11)
-    ax3.set_ylim([0, 105])
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
 
 def create_3wide_video(tracking_data, video_name, rgb_path, img_dims, segmentation_masks,
                        num_blobs, save_path, subsampled_indices=None, is_subsampled=False,
@@ -934,7 +692,7 @@ def create_3wide_video(tracking_data, video_name, rgb_path, img_dims, segmentati
 
     num_frames = min(len(tracking_data), len(rgb_files))
 
-    # Determine object particles from frame 0 using segmentation mask (like compute_error_rates)
+    # Determine object particles from frame 0 using segmentation mask overlap
     frame0 = tracking_data[0]
     blob_assignments_frame0 = frame0['blob_assignments']
     n_blobs_frame0 = NUM_BLOBS
@@ -949,7 +707,7 @@ def create_3wide_video(tracking_data, video_name, rgb_path, img_dims, segmentati
     )
     
     # Determine which blobs are object vs background based on mask overlap
-    # Use the same logic as compute_error_rates: check which pixels assigned to each blob overlap with mask
+    # Pixels assigned to each blob vs mask overlap
     object_blobs_frame0 = set()
     background_blobs_frame0 = set()
     
@@ -1193,13 +951,13 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             subsampled_indices=subsampled_indices
         )
 
-        # Ablation: Set all hyperblob covariances to huge values to disable cluster-level effects
+        # Inflate k-means hyperblob covariances (weak cluster-level coupling in the generative init)
         from genjax import ChoiceMapBuilder as C
         num_hyperblobs_actual = kmeans_chm['hyperblobs', 'hyperblob_covs'].shape[0]
         huge_hyperblob_covs = jnp.tile(1e6 * jnp.eye(3)[None, :, :], (num_hyperblobs_actual, 1, 1))
         kmeans_chm = kmeans_chm | C['hyperblobs', 'hyperblob_covs'].set(huge_hyperblob_covs)
 
-        # Create hyperparameters
+        # Create hyperparameters (empirical medians from k-means; same scale as non-ablation subsampling)
         num_datapoints = kmeans_chm['datapoints', 'datapoint_positions'].shape[0]
         num_blobs = kmeans_chm['blobs', 'hyperblob_assignments'].shape[0]
         num_hyperblobs = kmeans_chm['hyperblobs', 'hyperblob_means'].shape[0]
@@ -1207,10 +965,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         empirical_mu_H = jnp.median(kmeans_chm['datapoints', 'datapoint_positions'], axis=0)
         empirical_sigma_H = (10 * 0.5) ** 2
         empirical_Psi_B = jnp.median(kmeans_chm['blobs', 'blob_covs'][roi_blob_indices], axis=0)
-        empirical_Psi_H_original = jnp.median(kmeans_chm['hyperblobs', 'hyperblob_covs'][roi_hyperblob_indices], axis=0)
-        # Ablation: Set hyperblob covariance to huge value to disable cluster-level effects
-        # This makes the hyperblob prior essentially uninformative
-        empirical_Psi_H = 1e6 * jnp.eye(3)  # Huge covariance = no cluster-level constraint
+        empirical_Psi_H = 1e6 * jnp.eye(3)
         empirical_Psi_V = jnp.median(kmeans_chm['blobs', 'blob_vel_covs'][roi_blob_indices], axis=0)
         mean_blobs_per_roi_hyperblob = jnp.sum(
             jnp.isin(kmeans_chm['blobs', 'hyperblob_assignments'], roi_hyperblob_indices)
@@ -1221,7 +976,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         ) / len(roi_blob_indices)
         empirical_nu_B = empirical_nu_V = f_(int(mean_points_per_roi_blob))
 
-        hypers = HDGMM_Hyperparams_DINO.create(
+        hypers = GenMatter_Hyperparams_DINO.create(
             mu_F=jnp.array(gaussian_means),
             sigma_F_prior=jnp.array(gaussian_stds),
             # sigma_F=f_(20.0),
@@ -1257,21 +1012,21 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         key = jkey(RANDOM_SEED)
         key, key_importance = jax.random.split(key)
         init_tr, _ = model_jimportance(key_importance, kmeans_chm, (hypers,))
-        init_hdgmm_state = init_tr.get_retval()
+        init_genmatter_state = init_tr.get_retval()
 
         # Initial Gibbs sweeps
         key, init_gibbs_key = jax.random.split(key)
         print("Running initial Gibbs sweeps...")
-        gibbs_wtrs = init_gibbs_sweep_dino(init_gibbs_key, init_hdgmm_state, num_sweeps=15)
-        init_hdgmm_state = gibbs_wtrs[-1].retval
+        gibbs_wtrs = init_gibbs_sweep_dino(init_gibbs_key, init_genmatter_state, num_sweeps=15)
+        init_genmatter_state = gibbs_wtrs[-1].retval
 
         # # Post-Gibbs filtering (gets ignored if USE_SAM_FRAME0 is True)
         # fx = fy = FOCAL_LENGTH
         # cx = img_dims[1] / 2.0
         # cy = img_dims[0] / 2.0
 
-        # blob_means_after_gibbs = np.array(init_hdgmm_state.blobs_state.blob_means)
-        # hyperblob_assignments_after_gibbs = np.array(init_hdgmm_state.blobs_state.hyperblob_assignments)
+        # blob_means_after_gibbs = np.array(init_genmatter_state.blobs_state.blob_means)
+        # hyperblob_assignments_after_gibbs = np.array(init_genmatter_state.blobs_state.hyperblob_assignments)
 
         # x_2d = (blob_means_after_gibbs[:, 0] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fx + cx
         # y_2d = (blob_means_after_gibbs[:, 1] / (blob_means_after_gibbs[:, 2] + 1e-8)) * fy + cy
@@ -1279,7 +1034,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         # y_2d = np.clip(y_2d.astype(int), 0, img_dims[0] - 1)
         # pixel_indices = y_2d * img_dims[1] + x_2d
 
-        # blob_assignments_frame0 = np.array(init_hdgmm_state.datapoints_state.blob_assignments)
+        # blob_assignments_frame0 = np.array(init_genmatter_state.datapoints_state.blob_assignments)
         # n_blobs_after_gibbs = len(blob_means_after_gibbs)
         # valid_mask = blob_assignments_frame0 < n_blobs_after_gibbs
         # datapoint_to_hyperblob = np.full(len(blob_assignments_frame0), -1, dtype=int)
@@ -1311,7 +1066,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         #         updated_hyperblob_assignments = jnp.array(hyperblob_assignments_after_gibbs)
         #         for blob_idx in blobs_to_reassign:
         #             updated_hyperblob_assignments = updated_hyperblob_assignments.at[blob_idx].set(target_background_hb)
-        #         init_hdgmm_state = init_hdgmm_state.replace({
+        #         init_genmatter_state = init_genmatter_state.replace({
         #             'blobs_state': {'hyperblob_assignments': updated_hyperblob_assignments}
         #         })
 
@@ -1324,8 +1079,8 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         if MEASURE_FPS:
             # First run to trigger JIT compilation (not timed)
             print("JIT compiling tracking function...")
-            _ = hdgmm_tracking_gibbs_dino(
-                tracking_key, init_hdgmm_state,
+            _ = genmatter_tracking_gibbs_dino(
+                tracking_key, init_genmatter_state,
                 tracked_points, tracked_motion_vectors, tracked_features,
                 outlier_prob=1e-28
             )
@@ -1333,8 +1088,8 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             # Second run for timing (after JIT compilation)
             print("Measuring FPS after JIT compilation...")
             start_time = time.time()
-            tracking_wtrs = hdgmm_tracking_gibbs_dino(
-                tracking_key, init_hdgmm_state,
+            tracking_wtrs = genmatter_tracking_gibbs_dino(
+                tracking_key, init_genmatter_state,
                 tracked_points, tracked_motion_vectors, tracked_features,
                 outlier_prob=1e-28
             )
@@ -1346,8 +1101,8 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             fps = num_frames / total_time if total_time > 0 else 0.0
             print(f"Tracking FPS: {fps:.2f} frames/second (total time: {total_time:.2f}s for {num_frames} frames)")
         else:
-            tracking_wtrs = hdgmm_tracking_gibbs_dino(
-                tracking_key, init_hdgmm_state,
+            tracking_wtrs = genmatter_tracking_gibbs_dino(
+                tracking_key, init_genmatter_state,
                 tracked_points, tracked_motion_vectors, tracked_features,
                 outlier_prob=1e-28
             )
@@ -1363,7 +1118,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             key, dense_eval_assignments_key = jax.random.split(key)
             dense_eval_assignments = dense_eval_blob_assignments(
                 key=dense_eval_assignments_key, 
-                hdgmm_state=frame.retval, 
+                genmatter_state=frame.retval, 
                 dense_positions=tracked_points_full[frame_idx], 
                 dense_vels=tracked_motion_vectors_full[frame_idx], 
                 dense_features=tracked_features_full[frame_idx], 
@@ -1374,7 +1129,7 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             key, dense_eval_weights_key = jax.random.split(key)
             dense_eval_weights = dense_eval_blob_weights(
                 key=dense_eval_weights_key, 
-                hdgmm_state=frame.retval, 
+                genmatter_state=frame.retval, 
                 dense_assignments=dense_eval_assignments
             )
             frame_data = {
@@ -1399,29 +1154,19 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
             }
             tracking_data.append(frame_data)
 
-        # Evaluate
-        print("Computing error rates...")
+        # Segmentation masks for 3-wide video / viz
         segmentation_masks = []
         for frame_idx in range(len(tracking_data)):
             seg_mask = get_segmentation_mask(
                 video_name, frame_idx, DAVIS_SEGMASKS_PATH, img_dims=img_dims, flatten=True
             )
-            # if subsampled_indices is not None:
-            #     seg_mask = seg_mask[subsampled_indices]
             segmentation_masks.append(seg_mask)
 
-        # is_mask_subsampled = subsampling_percentage < 100
-        error_results = compute_error_rates(
-            tracking_data, segmentation_masks, img_dims,
-                BLOB_COUNTING_THRESHOLD, FOCAL_LENGTH, force_below_count_thresh_as_outlier=True,
-                subsampled_indices=None, is_mask_subsampled= False
-            )
-
-        # Get particle-count accuracy metrics
+        # Matter-weighted DAVIS metrics
         all_results = {video_name: [tracking_data]}
         experiment_metrics, best_visualization_data = evaluate_single_davis_video(
             davis_name=video_name,
-            multiple_genparticles_list=all_results[video_name],
+            multiple_genmatter_list=all_results[video_name],
             annotations_path=DAVIS_SEGMASKS_PATH,
             counting_threshold=BLOB_COUNTING_THRESHOLD,
             img_dims=img_dims,
@@ -1434,7 +1179,6 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
 
         result = {
             'video_name': video_name,
-            'error_results': error_results,
             'pixel_metrics': experiment_metrics,
             'tracking_data': tracking_data,
             'segmentation_masks': segmentation_masks,
@@ -1445,110 +1189,22 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
         }
 
         print(f"Completed: {video_name}")
-        
+
         if MEASURE_FPS and fps is not None:
             print(f"  FPS: {fps:.2f} frames/second")
-        
-        print(f"\n  1. PARTICLE-BASED METRICS (projected particle means):")
-        print(f"    Mean FN Rate: {error_results['mean_fn_rate']:.2f}%  (object particles leaving mask)")
-        print(f"    Mean FP Rate: {error_results['mean_fp_rate']:.2f}%  (background particles entering mask)")
-        print(f"    Mean Jaccard: {error_results['mean_jaccard']:.3f}  (particle IoU)")
-        print(f"    Mean Accuracy: {error_results['mean_accuracy']:.2f}%  ((TN + TP) / (TP + TN + FP + FN))")
-        print(f"    Note: Projects particle means to 2D, checks if they fall within GT mask")
 
-        # Compute F1 from recall and precision (not returned by evaluate_single_davis_video)
-        recall = experiment_metrics['avg_recall']
-        precision = experiment_metrics['avg_precision']
-        avg_f1 = 2 * (recall * precision) / (recall + precision) if (recall + precision) > 0 else 0.0
-
-        print(f"\n  2. PARTICLE-COUNT UNWEIGHTED METRICS (fractional particle contributions):")
-        print(f"    Recall:     {recall:.3f}  (fractional object particles correctly predicted)")
-        print(f"    Precision:  {precision:.3f}  (predicted fractional particles that are correct)")
-        print(f"    F1:         {avg_f1:.3f}  (harmonic mean)")
-        print(f"    Jaccard:    {experiment_metrics['avg_jaccard']:.3f}  (fractional particle IoU)")
-        print(f"    Accuracy:   {experiment_metrics['avg_accuracy']:.3f}  (fractional particle accuracy)")
-        print(f"    Note: Each particle contributes fractionally based on proportion of pixels in GT mask")
-
-        print(f"\n  3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (weighted fractional contributions):")
-        print(f"    Recall:     {experiment_metrics['avg_matter_weighted_recall']:.3f}  (weighted object matter staying in mask)")
-        print(f"    Precision:  {experiment_metrics['avg_matter_weighted_precision']:.3f}  (predicted weighted matter correctness)")
-        print(f"    F1:         {experiment_metrics['avg_matter_weighted_f1']:.3f}  (harmonic mean)")
-        print(f"    Jaccard:    {experiment_metrics['avg_matter_weighted_jaccard']:.3f}  (weighted matter IoU)")
-        print(f"    Accuracy:   {experiment_metrics['avg_matter_weighted_accuracy']:.3f}  (weighted matter accuracy)")
-        print(f"    Note: Weights fractional contributions by (pixel_count × blob_weight), adaptive per frame")
-
-        print(f"\n  4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (weighted fractional contributions):")
-        print(f"    Recall:     {experiment_metrics['avg_matter_weighted_recall_fixed']:.3f}  (weighted object matter staying in mask)")
-        print(f"    Precision:  {experiment_metrics['avg_matter_weighted_precision_fixed']:.3f}  (predicted weighted matter correctness)")
-        print(f"    F1:         {experiment_metrics['avg_matter_weighted_f1_fixed']:.3f}  (harmonic mean)")
-        print(f"    Jaccard:    {experiment_metrics['avg_matter_weighted_jaccard_fixed']:.3f}  (weighted matter IoU)")
-        print(f"    Accuracy:   {experiment_metrics['avg_matter_weighted_accuracy_fixed']:.3f}  (weighted matter accuracy)")
-        print(f"    Note: Weights fractional contributions by (pixel_count × blob_weight), fixed from frame 0")
-
-        # Diagnostic checks for adversarial cases
-        print(f"\n  Diagnostic Checks (detecting potential metric gaming):")
-
-        # 1. Adaptive-Fixed Gap
-        adaptive_fixed_gap = experiment_metrics['avg_matter_weighted_f1_fixed'] - experiment_metrics['avg_matter_weighted_f1']
-        print(f"    Adaptive-Fixed Gap:  {adaptive_fixed_gap:+.3f}  (if > 0.1, model may downweight difficult particles)")
-        if adaptive_fixed_gap > 0.1:
-            print(f"    ⚠️  WARNING: Large gap suggests adaptive weights are gaming the metric")
-        elif adaptive_fixed_gap < -0.05:
-            print(f"    ⚠️  WARNING: Negative gap suggests fixed weights may be suboptimal")
-
-        # 2. Weight Entropy (frame 0)
-        frame0_blob_weights = np.array(tracking_data[0]['blob_weights'])
-        weight_entropy = -np.sum(frame0_blob_weights * np.log(frame0_blob_weights + 1e-10))
-        max_entropy = np.log(len(frame0_blob_weights))
-        normalized_entropy = weight_entropy / max_entropy
-        print(f"    Weight Entropy:      {normalized_entropy:.3f}  (if < 0.5, weights concentrated; 1.0 = uniform)")
-        if normalized_entropy < 0.5:
-            print(f"    ⚠️  WARNING: Weights are concentrated on few particles (potential gaming)")
-
-        # 3. Spatial Coverage (reference particles)
-        frame0_blob_means = np.array(tracking_data[0]['blob_means'])
-        frame0_hyperblob_assignments = np.array(tracking_data[0]['hyperblob_assignments'])
-        frame0_blob_assignments = np.array(tracking_data[0]['blob_assignments'])
-        
-        # Handle reshaping based on whether subsampling was used
-        if result.get('subsampled_indices') is None:
-            # No subsampling: reshape to image dimensions if needed
-            if frame0_blob_assignments.ndim == 1:
-                frame0_blob_assignments = frame0_blob_assignments.reshape(result['img_dims'])
-        else:
-            # Subsampling was used: keep as 1D (already subsampled)
-            if frame0_blob_assignments.ndim > 1:
-                frame0_blob_assignments = frame0_blob_assignments.flatten()
-        
-        frame0_n_blobs = tracking_data[0]['n_blobs']
-
-        # Get reference particles (same logic as evaluation)
-        blob_pixel_counts = np.bincount(
-            frame0_blob_assignments.flatten()[frame0_blob_assignments.flatten() < frame0_n_blobs],
-            minlength=frame0_n_blobs
-        )
-        reference_particle_indices = np.where(blob_pixel_counts >= BLOB_COUNTING_THRESHOLD)[0]
-
-        if len(reference_particle_indices) > 1:
-            ref_positions = frame0_blob_means[reference_particle_indices]
-            spatial_std = np.std(ref_positions, axis=0)
-            avg_spatial_std = np.mean(spatial_std)
-            print(f"    Spatial Std Dev:     {avg_spatial_std:.3f}  (particles spread; low values = clustered)")
-            if avg_spatial_std < 0.1:
-                print(f"    ⚠️  WARNING: Reference particles are highly clustered (potential gaming)")
-        else:
-            print(f"    Spatial Std Dev:     N/A  (only {len(reference_particle_indices)} reference particle)")
-
-        # 4. Number of reference particles
-        print(f"    Ref Particles:       {len(reference_particle_indices)}  (particles used for evaluation)")
-        if len(reference_particle_indices) < 10:
-            print(f"    ⚠️  WARNING: Very few reference particles (metric may be fragile)")
+        print(f"\n  MATTER-WEIGHTED (frame-0 blob weights) — primary DAVIS metric:")
+        pm = experiment_metrics
+        print(f"    Recall:     {pm['avg_matter_weighted_recall_fixed']:.3f}")
+        print(f"    Precision:  {pm['avg_matter_weighted_precision_fixed']:.3f}")
+        print(f"    Jaccard:    {pm['avg_matter_weighted_jaccard_fixed']:.3f}")
+        print(f"    Accuracy:   {pm['avg_matter_weighted_accuracy_fixed']:.3f}")
 
         # Clean up large intermediate variables before returning
         # These are no longer needed after creating the result
         del tracking_wtrs
         del gibbs_wtrs
-        del init_hdgmm_state
+        del init_genmatter_state
         del all_results
         del segmentation_masks
         
@@ -1577,17 +1233,37 @@ def process_video(video_name, subsampling_percentage=100.0, subsampled_indices=N
 # ============================================================================
 
 if __name__ == "__main__":
+    import argparse
+    import sys
+
+    _davis_dir = _Path(__file__).resolve().parent
+    if str(_davis_dir) not in sys.path:
+        sys.path.insert(0, str(_davis_dir))
+    import davis_run_cli
+
+    _parser = argparse.ArgumentParser(description="DAVIS DINO ablation")
+    davis_run_cli.add_frame0_init_args(_parser)
+    davis_run_cli.add_save_3wide_video_args(_parser)
+    davis_run_cli.add_skip_completed_args(_parser)
+    _args = _parser.parse_args()
+    davis_run_cli.configure_experiment_module(sys.modules[__name__], _args, "ablation")
+
     os.makedirs(EXPERIMENT_SAVE_DIR, exist_ok=True)
 
     all_results = []
     all_accuracies = {}
 
     print(f"{'='*80}")
-    print(f"DINO TRACKING EXPERIMENT - Processing {len(VIDEO_NAMES)} videos")
+    print(f"DINO ablation - Processing {len(VIDEO_NAMES)} videos")
+    print(f"  SAM frame-0 init: {USE_SAM_FRAME0}")
+    print(f"  Save 3-wide videos: {SAVE_3WIDE_VIDEO}")
+    print(f"  Output directory: {EXPERIMENT_SAVE_DIR}")
     if MEASURE_FPS:
         print(f"FPS measurement: ENABLED")
     else:
         print(f"FPS measurement: DISABLED")
+    if SKIP_COMPLETED:
+        print(f"  Skip completed: YES (per subsample_*/json_results/*_results.json)")
     print(f"{'='*80}\n")
 
     subsampling_percentages = [0.78125]
@@ -1600,6 +1276,26 @@ if __name__ == "__main__":
             run_save_dir = os.path.join(EXPERIMENT_SAVE_DIR, run_dir_name)
             os.makedirs(run_save_dir, exist_ok=True)
 
+            json_results_dir = os.path.join(run_save_dir, "json_results")
+            per_run_json_path = os.path.join(json_results_dir, f"{video_name}_results.json")
+            if SKIP_COMPLETED and os.path.isfile(per_run_json_path):
+                with open(per_run_json_path, "r") as f:
+                    vid_metrics = json.load(f)
+                all_accuracies[video_name] = vid_metrics
+                json_path = os.path.join(run_save_dir, "all_videos_experiment_results.json")
+                if os.path.exists(json_path):
+                    with open(json_path, "r") as f:
+                        existing_results = json.load(f)
+                    existing_results.update({video_name: vid_metrics})
+                    all_accuracies_to_save = existing_results
+                else:
+                    all_accuracies_to_save = {video_name: vid_metrics}
+                with open(json_path, "w") as f:
+                    json.dump(all_accuracies_to_save, f, indent=2)
+                print(f"[skip-completed] {video_name} ({percentage}% grid) -> {per_run_json_path}")
+                cleanup_between_runs()
+                continue
+
             result = process_video(video_name, subsampling_percentage=percentage, subsampled_indices=None, run_save_dir=run_save_dir)
 
             # Clean up memory after each subsampling percentage run
@@ -1608,105 +1304,32 @@ if __name__ == "__main__":
             if result is not None:
                 all_results.append(result)
 
-                # Create subdirectories for outputs
                 base_dir = run_save_dir if ('subsampling_percentage' in result) else EXPERIMENT_SAVE_DIR
-                plots_dir = os.path.join(base_dir, "error_rate_plots")
-                videos_dir = os.path.join(base_dir, "3wide_videos")
-                os.makedirs(plots_dir, exist_ok=True)
-                os.makedirs(videos_dir, exist_ok=True)
 
-                # Save error rate plot
-                plot_path = os.path.join(plots_dir, f"{video_name}_error_rates.png")
-                plot_error_rates(result['error_results'], video_name, plot_path)
-                print(f"Saved error rate plot: {plot_path}")
+                if SAVE_3WIDE_VIDEO:
+                    videos_dir = os.path.join(base_dir, "3wide_videos")
+                    os.makedirs(videos_dir, exist_ok=True)
+                    video_path = os.path.join(videos_dir, f"{video_name}_3wide_synchronized.mp4")
+                    create_3wide_video(
+                        result['tracking_data'], video_name, DAVIS_RGB_PATH,
+                        result['img_dims'], result['segmentation_masks'],
+                        NUM_BLOBS, video_path, subsampled_indices=None, is_subsampled=False
+                    )
+                    print(f"Saved 3-wide video: {video_path}")
 
-                # Save 3-wide video (TEMPORARILY DISABLED)
-                video_path = os.path.join(videos_dir, f"{video_name}_3wide_synchronized.mp4")
-                # is_subsampled = result.get('subsampling_percentage') < 100
-                create_3wide_video(
-                    result['tracking_data'], video_name, DAVIS_RGB_PATH,
-                    result['img_dims'], result['segmentation_masks'],
-                    NUM_BLOBS, video_path, subsampled_indices=None, is_subsampled=False
-                )
-                print(f"Saved 3-wide video: {video_path}")
-
-                # Compute diagnostics for JSON
+                pm = result['pixel_metrics']
                 tracking_data = result['tracking_data']
-                frame0_blob_weights = np.array(tracking_data[0]['blob_weights'])
-                weight_entropy = -np.sum(frame0_blob_weights * np.log(frame0_blob_weights + 1e-10))
-                max_entropy = np.log(len(frame0_blob_weights))
-                normalized_entropy = float(weight_entropy / max_entropy)
 
-                frame0_blob_means = np.array(tracking_data[0]['blob_means'])
-                frame0_blob_assignments_vec = np.array(tracking_data[0]['blob_assignments'])
-                frame0_n_blobs = tracking_data[0]['n_blobs']
-                blob_pixel_counts = np.bincount(
-                    frame0_blob_assignments_vec[frame0_blob_assignments_vec < frame0_n_blobs],
-                    minlength=frame0_n_blobs
-                )
-                reference_particle_indices = np.where(blob_pixel_counts >= BLOB_COUNTING_THRESHOLD)[0]
-
-                if len(reference_particle_indices) > 1:
-                    ref_positions = frame0_blob_means[reference_particle_indices]
-                    spatial_std = np.std(ref_positions, axis=0)
-                    avg_spatial_std = float(np.mean(spatial_std))
-                else:
-                    avg_spatial_std = None
-
-                adaptive_fixed_gap = float(
-                    result['pixel_metrics']['avg_matter_weighted_f1_fixed'] -
-                    result['pixel_metrics']['avg_matter_weighted_f1']
-                )
-
-                # Store accuracy with all four metric types
                 all_accuracies[video_name] = {
-                    # Full pixel metrics dict (contains all trial data)
-                    'pixel_metrics': result['pixel_metrics'],
+                    'pixel_metrics': pm,
 
-                    # 1. Particle-based error rates (projected particle means)
-                    'particle_fn_rate': result['error_results']['mean_fn_rate'],
-                    'particle_fp_rate': result['error_results']['mean_fp_rate'],
-                    'particle_jaccard': result['error_results']['mean_jaccard'],
-                    'particle_accuracy': result['error_results']['mean_accuracy'],
-                    'n_object_particles': result['error_results']['n_object_blobs'],
-                    'n_background_particles': result['error_results']['n_background_blobs'],
+                    'particle_count_matter_fixed_recall': pm['avg_matter_weighted_recall_fixed'],
+                    'particle_count_matter_fixed_precision': pm['avg_matter_weighted_precision_fixed'],
+                    'particle_count_matter_fixed_jaccard': pm['avg_matter_weighted_jaccard_fixed'],
+                    'particle_count_matter_fixed_accuracy': pm['avg_matter_weighted_accuracy_fixed'],
 
-                    # 2. Particle-count unweighted metrics (fractional particle contributions)
-                    'particle_count_unweighted_recall': result['pixel_metrics']['avg_recall'],
-                    'particle_count_unweighted_precision': result['pixel_metrics']['avg_precision'],
-                    'particle_count_unweighted_f1': 2 * (result['pixel_metrics']['avg_recall'] * result['pixel_metrics']['avg_precision']) / (result['pixel_metrics']['avg_recall'] + result['pixel_metrics']['avg_precision']) if (result['pixel_metrics']['avg_recall'] + result['pixel_metrics']['avg_precision']) > 0 else 0.0,
-                    'particle_count_unweighted_jaccard': result['pixel_metrics']['avg_jaccard'],
-                    'particle_count_unweighted_accuracy': result['pixel_metrics']['avg_accuracy'],
-
-                    # 3. Particle-count matter-weighted adaptive metrics (weighted fractional contributions)
-                    'particle_count_matter_adaptive_recall': result['pixel_metrics']['avg_matter_weighted_recall'],
-                    'particle_count_matter_adaptive_precision': result['pixel_metrics']['avg_matter_weighted_precision'],
-                    'particle_count_matter_adaptive_f1': result['pixel_metrics']['avg_matter_weighted_f1'],
-                    'particle_count_matter_adaptive_jaccard': result['pixel_metrics']['avg_matter_weighted_jaccard'],
-                    'particle_count_matter_adaptive_accuracy': result['pixel_metrics']['avg_matter_weighted_accuracy'],
-
-                    # 4. Particle-count matter-weighted fixed metrics (weighted fractional contributions)
-                    'particle_count_matter_fixed_recall': result['pixel_metrics']['avg_matter_weighted_recall_fixed'],
-                    'particle_count_matter_fixed_precision': result['pixel_metrics']['avg_matter_weighted_precision_fixed'],
-                    'particle_count_matter_fixed_f1': result['pixel_metrics']['avg_matter_weighted_f1_fixed'],
-                    'particle_count_matter_fixed_jaccard': result['pixel_metrics']['avg_matter_weighted_jaccard_fixed'],
-                    'particle_count_matter_fixed_accuracy': result['pixel_metrics']['avg_matter_weighted_accuracy_fixed'],
-
-                    # FPS measurement
                     'fps': result.get('fps'),
-
-                    # Diagnostic metrics (detecting potential gaming)
-                    'diagnostics': {
-                        'adaptive_fixed_gap': adaptive_fixed_gap,
-                        'weight_entropy_normalized': normalized_entropy,
-                        'spatial_std_dev': avg_spatial_std,
-                        'n_reference_particles': int(len(reference_particle_indices)),
-                        'warning_adaptive_fixed_gap': adaptive_fixed_gap > 0.1,
-                        'warning_weight_concentration': normalized_entropy < 0.5,
-                        'warning_spatial_clustering': avg_spatial_std is not None and avg_spatial_std < 0.1,
-                        'warning_few_particles': len(reference_particle_indices) < 10
-                    }
-                    }
+                }
 
                 # Save per-run JSON
                 json_results_dir = os.path.join(base_dir, "json_results")
@@ -1737,14 +1360,7 @@ if __name__ == "__main__":
                     del tracking_data
                 except NameError:
                     pass
-                
-                # Clean up local variables used for diagnostics
-                try:
-                    del frame0_blob_weights, frame0_blob_means, frame0_blob_assignments_vec
-                    del blob_pixel_counts, reference_particle_indices
-                except NameError:
-                    pass
-                
+
                 # Force garbage collection after processing result
                 gc.collect()
 
@@ -1769,45 +1385,26 @@ if __name__ == "__main__":
         all_accuracies_from_json = all_accuracies
 
     # Filter out incomplete results (videos that failed to process)
-    valid_results = {k: v for k, v in all_accuracies_from_json.items() 
-                    if 'particle_fn_rate' in v and 'particle_count_unweighted_recall' in v}
+    valid_results = {
+        k: v
+        for k, v in all_accuracies_from_json.items()
+        if 'particle_count_matter_fixed_jaccard' in v
+    }
 
     print(f"\n{'='*80}")
     print(f"SUMMARY - {len(valid_results)} Videos")
     print(f"{'='*80}")
-    print(f"\nMetric Interpretation Guide:")
-    print(f"  • Particle-based: Projects particle means to 2D, checks if they fall within GT mask")
-    print(f"  • Particle-count unweighted: Fractional particle contributions, equal weight per particle")
-    print(f"  • Particle-count matter adaptive: Fractional contributions weighted by (pixel_count × blob_weight), adaptive per frame")
-    print(f"  • Particle-count matter fixed: Fractional contributions weighted by (pixel_count × blob_weight), fixed from frame 0")
+    print(f"\nMetric guide: matter-weighted recall / precision / Jaccard use frame-0 blob weights (primary DAVIS metric).")
     print(f"\n")
 
-    # Compute aggregate statistics for all four metric types
+    # Aggregate statistics
     
     # if len(valid_results) == 0:
     #     print("⚠️  No valid results found in JSON file. Cannot compute aggregate statistics.")
     #     return
     
-    particle_fn_rates = [m['particle_fn_rate'] for m in valid_results.values()]
-    particle_fp_rates = [m['particle_fp_rate'] for m in valid_results.values()]
-    particle_jaccard = [m['particle_jaccard'] for m in valid_results.values()]
-    particle_accuracy = [m['particle_accuracy'] for m in valid_results.values()]
-    
-    particle_count_unweighted_recall = [m['particle_count_unweighted_recall'] for m in valid_results.values()]
-    particle_count_unweighted_precision = [m['particle_count_unweighted_precision'] for m in valid_results.values()]
-    particle_count_unweighted_f1 = [m['particle_count_unweighted_f1'] for m in valid_results.values()]
-    particle_count_unweighted_jaccard = [m['particle_count_unweighted_jaccard'] for m in valid_results.values()]
-    particle_count_unweighted_accuracy = [m['particle_count_unweighted_accuracy'] for m in valid_results.values()]
-    
-    particle_count_matter_adaptive_recall = [m['particle_count_matter_adaptive_recall'] for m in valid_results.values()]
-    particle_count_matter_adaptive_precision = [m['particle_count_matter_adaptive_precision'] for m in valid_results.values()]
-    particle_count_matter_adaptive_f1 = [m['particle_count_matter_adaptive_f1'] for m in valid_results.values()]
-    particle_count_matter_adaptive_jaccard = [m['particle_count_matter_adaptive_jaccard'] for m in valid_results.values()]
-    particle_count_matter_adaptive_accuracy = [m['particle_count_matter_adaptive_accuracy'] for m in valid_results.values()]
-    
     particle_count_matter_fixed_recall = [m['particle_count_matter_fixed_recall'] for m in valid_results.values()]
     particle_count_matter_fixed_precision = [m['particle_count_matter_fixed_precision'] for m in valid_results.values()]
-    particle_count_matter_fixed_f1 = [m['particle_count_matter_fixed_f1'] for m in valid_results.values()]
     particle_count_matter_fixed_jaccard = [m['particle_count_matter_fixed_jaccard'] for m in valid_results.values()]
     particle_count_matter_fixed_accuracy = [m['particle_count_matter_fixed_accuracy'] for m in valid_results.values()]
 
@@ -1815,34 +1412,25 @@ if __name__ == "__main__":
     fps_values = [m.get('fps') for m in valid_results.values() if m.get('fps') is not None]
 
     print(f"AGGREGATE STATISTICS ACROSS ALL VIDEOS:")
-    
-    print(f"\n  1. PARTICLE-BASED METRICS (projected particle means):")
-    print(f"    Mean FN Rate:            {np.mean(particle_fn_rates):.2f}% ± {np.std(particle_fn_rates):.2f}%")
-    print(f"    Mean FP Rate:            {np.mean(particle_fp_rates):.2f}% ± {np.std(particle_fp_rates):.2f}%")
-    print(f"    Mean Jaccard:            {np.mean(particle_jaccard):.3f} ± {np.std(particle_jaccard):.3f}")
+    print(
+        f"  (95% CIs: percentile bootstrap on video means, B={BOOTSTRAP_N_SAMPLES}, seed={BOOTSTRAP_RANDOM_SEED})"
+    )
 
-    print(f"\n  2. PARTICLE-COUNT UNWEIGHTED METRICS (fractional particle contributions):")
-    print(f"    Recall:                  {np.mean(particle_count_unweighted_recall):.3f} ± {np.std(particle_count_unweighted_recall):.3f}")
-    print(f"    Precision:               {np.mean(particle_count_unweighted_precision):.3f} ± {np.std(particle_count_unweighted_precision):.3f}")
-    print(f"    F1:                      {np.mean(particle_count_unweighted_f1):.3f} ± {np.std(particle_count_unweighted_f1):.3f}")
-    print(f"    Jaccard:                 {np.mean(particle_count_unweighted_jaccard):.3f} ± {np.std(particle_count_unweighted_jaccard):.3f}")
-
-    print(f"\n  3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (weighted fractional contributions):")
-    print(f"    Recall:                  {np.mean(particle_count_matter_adaptive_recall):.3f} ± {np.std(particle_count_matter_adaptive_recall):.3f}")
-    print(f"    Precision:               {np.mean(particle_count_matter_adaptive_precision):.3f} ± {np.std(particle_count_matter_adaptive_precision):.3f}")
-    print(f"    F1:                      {np.mean(particle_count_matter_adaptive_f1):.3f} ± {np.std(particle_count_matter_adaptive_f1):.3f}")
-    print(f"    Jaccard:                 {np.mean(particle_count_matter_adaptive_jaccard):.3f} ± {np.std(particle_count_matter_adaptive_jaccard):.3f}")
-
-    print(f"\n  4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (weighted fractional contributions):")
-    print(f"    Recall:                  {np.mean(particle_count_matter_fixed_recall):.3f} ± {np.std(particle_count_matter_fixed_recall):.3f}")
-    print(f"    Precision:               {np.mean(particle_count_matter_fixed_precision):.3f} ± {np.std(particle_count_matter_fixed_precision):.3f}")
-    print(f"    F1:                      {np.mean(particle_count_matter_fixed_f1):.3f} ± {np.std(particle_count_matter_fixed_f1):.3f}")
-    print(f"    Jaccard:                 {np.mean(particle_count_matter_fixed_jaccard):.3f} ± {np.std(particle_count_matter_fixed_jaccard):.3f}")
+    print(f"\n  MATTER-WEIGHTED FIXED (primary DAVIS metric):")
+    for label, arr in [
+        ("Recall", particle_count_matter_fixed_recall),
+        ("Precision", particle_count_matter_fixed_precision),
+        ("Jaccard", particle_count_matter_fixed_jaccard),
+        ("Accuracy", particle_count_matter_fixed_accuracy),
+    ]:
+        m, lo, hi = bootstrap_mean_ci_95(arr)
+        print(f"    {label:18s} {m:.3f} [{lo:.3f}, {hi:.3f}]")
 
     # Print FPS statistics if available
     if fps_values:
         print(f"\n  5. PERFORMANCE METRICS:")
-        print(f"    FPS:                     {np.mean(fps_values):.2f} ± {np.std(fps_values):.2f} frames/second")
+        fm, flo, fhi = bootstrap_mean_ci_95(fps_values)
+        print(f"    FPS:                     {fm:.2f} [{flo:.2f}, {fhi:.2f}] frames/second")
         print(f"    Videos with FPS data:    {len(fps_values)}/{len(valid_results)}")
     else:
         print(f"\n  5. PERFORMANCE METRICS:")
@@ -1853,29 +1441,12 @@ if __name__ == "__main__":
 
     for video_name, metrics in valid_results.items():
         print(f"  {video_name}:")
-        
-        print(f"    1. PARTICLE-BASED METRICS (projected particle means):")
-        print(f"      FN Rate:                 {metrics['particle_fn_rate']:.2f}%  (object particles leaving mask)")
-        print(f"      FP Rate:                 {metrics['particle_fp_rate']:.2f}%  (background particles entering mask)")
-        print(f"      Jaccard:                 {metrics['particle_jaccard']:.3f}  (particle IoU)")
 
-        print(f"\n    2. PARTICLE-COUNT UNWEIGHTED METRICS (fractional particle contributions):")
-        print(f"      Recall:                  {metrics['particle_count_unweighted_recall']:.3f}  (fractional object particles correctly predicted)")
-        print(f"      Precision:               {metrics['particle_count_unweighted_precision']:.3f}  (predicted fractional particles that are correct)")
-        print(f"      F1:                      {metrics['particle_count_unweighted_f1']:.3f}  (harmonic mean)")
-        print(f"      Jaccard:                 {metrics['particle_count_unweighted_jaccard']:.3f}  (fractional particle IoU)")
-
-        print(f"\n    3. PARTICLE-COUNT MATTER-WEIGHTED ADAPTIVE METRICS (weighted fractional contributions):")
-        print(f"      Recall:                  {metrics['particle_count_matter_adaptive_recall']:.3f}  (weighted object matter staying in mask)")
-        print(f"      Precision:               {metrics['particle_count_matter_adaptive_precision']:.3f}  (predicted weighted matter correctness)")
-        print(f"      F1:                      {metrics['particle_count_matter_adaptive_f1']:.3f}  (harmonic mean)")
-        print(f"      Jaccard:                 {metrics['particle_count_matter_adaptive_jaccard']:.3f}  (weighted matter IoU)")
-
-        print(f"\n    4. PARTICLE-COUNT MATTER-WEIGHTED FIXED METRICS (weighted fractional contributions):")
-        print(f"      Recall:                  {metrics['particle_count_matter_fixed_recall']:.3f}  (weighted object matter staying in mask)")
-        print(f"      Precision:               {metrics['particle_count_matter_fixed_precision']:.3f}  (predicted weighted matter correctness)")
-        print(f"      F1:                      {metrics['particle_count_matter_fixed_f1']:.3f}  (harmonic mean)")
-        print(f"      Jaccard:                 {metrics['particle_count_matter_fixed_jaccard']:.3f}  (weighted matter IoU)")
+        print(f"    Matter-weighted fixed:")
+        print(f"      Recall:                  {metrics['particle_count_matter_fixed_recall']:.3f}")
+        print(f"      Precision:               {metrics['particle_count_matter_fixed_precision']:.3f}")
+        print(f"      Jaccard:                 {metrics['particle_count_matter_fixed_jaccard']:.3f}")
+        print(f"      Accuracy:                {metrics['particle_count_matter_fixed_accuracy']:.3f}")
 
         # Print FPS for this video if available
         video_fps = metrics.get('fps')

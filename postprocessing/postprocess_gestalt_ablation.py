@@ -1,6 +1,6 @@
 """Postprocess Gestalt ablation results.
 
-Compares baseline HDGMM (full depth) vs depth-ablation HDGMM results
+Compares baseline GenMatter (full depth) vs depth-ablation GenMatter results
 across all Gestalt scenes and textures. Computes probe-point segmentation
 metrics (accuracy, Jaccard, precision, recall, F1) and outputs summary
 statistics as JSON and CSV.
@@ -14,12 +14,19 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 from PIL import Image
 from scipy import stats
 from scipy.ndimage import zoom
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config
+
+from genmatter.bootstrap_stats import (
+    BOOTSTRAP_N_SAMPLES,
+    BOOTSTRAP_RANDOM_SEED,
+    bootstrap_mean_ci_95,
+)
 
 GESTALT_SCENES = list(config.GESTALT_SCENES)
 GESTALT_TEXTURES = list(config.GESTALT_TEXTURES)
@@ -45,7 +52,7 @@ def load_ground_truth_mask(scene: str, frame_idx: int) -> np.ndarray | None:
     return mask_img > 127
 
 
-def load_hdgmm_mask(
+def load_genmatter_mask(
     scene: str,
     texture: str,
     frame_idx: int,
@@ -187,8 +194,8 @@ def evaluate_frame(
     texture_num = int(texture.split("_")[1])
     eval_seed = random_seed + scene_num * 1000 + texture_num * 10 + frame_idx
 
-    baseline_mask = load_hdgmm_mask(scene, texture, frame_idx, config.GESTALT_OUTPUT_DIR)
-    ablation_mask = load_hdgmm_mask(scene, texture, frame_idx, config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR)
+    baseline_mask = load_genmatter_mask(scene, texture, frame_idx, config.GESTALT_OUTPUT_DIR)
+    ablation_mask = load_genmatter_mask(scene, texture, frame_idx, config.GESTALT_DEPTH_ABLATION_OUTPUT_DIR)
 
     target_size = 96
     if baseline_mask is not None:
@@ -233,11 +240,35 @@ def _safe_float(x):
     return x
 
 
+def _term_styles() -> dict[str, str]:
+    if not sys.stdout.isatty():
+        return {k: "" for k in ("reset", "bold", "dim", "cyan", "green", "magenta", "yellow")}
+    return {
+        "reset": "\033[0m",
+        "bold": "\033[1m",
+        "dim": "\033[2m",
+        "cyan": "\033[96m",
+        "green": "\033[92m",
+        "magenta": "\033[95m",
+        "yellow": "\033[93m",
+    }
+
+
+def _fmt_ci(
+    mean: float | None, lo: float | None, hi: float | None
+) -> str:
+    if mean is None or lo is None or hi is None:
+        return "N/A"
+    return f"{mean:.4f} [{lo:.4f}, {hi:.4f}]"
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+
+def run_gestalt_ablation_postprocess() -> bool:
+    """Compare baseline vs depth-ablation GenMatter. Returns True if analysis ran."""
     np.random.seed(RANDOM_SEED)
 
     baseline_dir = str(config.GESTALT_OUTPUT_DIR)
@@ -245,58 +276,86 @@ def main() -> None:
     output_dir = config.POSTPROCESSING_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"Gestalt ablation comparison")
-    print(f"  Scenes:   {len(GESTALT_SCENES)}")
-    print(f"  Textures: {len(GESTALT_TEXTURES)}")
-    print(f"  Baseline: {baseline_dir}")
-    print(f"  Ablation: {ablation_dir}")
-    print(f"  GT masks: {config.GESTALT_BASE_PATH}")
-    print()
+    any_combo = False
+    for scene in GESTALT_SCENES:
+        for texture in GESTALT_TEXTURES:
+            if os.path.exists(os.path.join(baseline_dir, scene, texture, "run_0")) or os.path.exists(
+                os.path.join(ablation_dir, scene, texture, "run_0")
+            ):
+                any_combo = True
+                break
+        if any_combo:
+            break
+
+    if not any_combo:
+        print("\n" + "=" * 80)
+        print("Skipping Gestalt depth-ablation comparison (no run_0 under baseline or ablation).")
+        print(f"  Baseline: {baseline_dir}")
+        print(f"  Ablation: {ablation_dir}")
+        print("=" * 80)
+        return False
+
+    t0 = _term_styles()
+    print(
+        f"\n{t0['cyan']}{t0['bold']}Gestalt depth-ablation{t0['reset']}  "
+        f"{t0['dim']}{output_dir}{t0['reset']}"
+    )
+    print(
+        f"{t0['dim']}baseline: {baseline_dir}  ·  ablation: {ablation_dir}  ·  "
+        f"GT: {config.GESTALT_BASE_PATH}{t0['reset']}\n"
+    )
 
     # ------------------------------------------------------------------
     # Collect per-combination results
     # ------------------------------------------------------------------
-    all_results: list[dict] = []
+    combos: list[tuple[str, str]] = []
     for scene in GESTALT_SCENES:
         for texture in GESTALT_TEXTURES:
             has_baseline = os.path.exists(os.path.join(baseline_dir, scene, texture, "run_0"))
             has_ablation = os.path.exists(os.path.join(ablation_dir, scene, texture, "run_0"))
-            if not (has_baseline or has_ablation):
-                continue
+            if has_baseline or has_ablation:
+                combos.append((scene, texture))
 
-            print(f"  Processing {scene} / {texture}")
+    all_results: list[dict] = []
+    for scene, texture in tqdm(combos, desc="Gestalt depth ablation", unit="combo", file=sys.stdout):
+        baseline_accs: list[float | None] = []
+        ablation_accs: list[float | None] = []
+        baseline_metrics_frames: list[dict | None] = []
+        ablation_metrics_frames: list[dict | None] = []
 
-            baseline_accs: list[float | None] = []
-            ablation_accs: list[float | None] = []
-            baseline_metrics_frames: list[dict | None] = []
-            ablation_metrics_frames: list[dict | None] = []
+        for fi in range(NUM_FRAMES):
+            res = evaluate_frame(scene, texture, fi, NUM_PROBES)
+            if res is None:
+                baseline_accs.append(None)
+                ablation_accs.append(None)
+                baseline_metrics_frames.append(None)
+                ablation_metrics_frames.append(None)
+            else:
+                baseline_accs.append(res["baseline_acc"])
+                ablation_accs.append(res["ablation_acc"])
+                baseline_metrics_frames.append(res["baseline_metrics"])
+                ablation_metrics_frames.append(res["ablation_metrics"])
 
-            for fi in range(NUM_FRAMES):
-                res = evaluate_frame(scene, texture, fi, NUM_PROBES)
-                if res is None:
-                    baseline_accs.append(None)
-                    ablation_accs.append(None)
-                    baseline_metrics_frames.append(None)
-                    ablation_metrics_frames.append(None)
-                else:
-                    baseline_accs.append(res["baseline_acc"])
-                    ablation_accs.append(res["ablation_acc"])
-                    baseline_metrics_frames.append(res["baseline_metrics"])
-                    ablation_metrics_frames.append(res["ablation_metrics"])
+        bl_valid = [a for a in baseline_accs if a is not None]
+        ab_valid = [a for a in ablation_accs if a is not None]
+        bl_lo = bl_hi = ab_lo = ab_hi = None
+        if bl_valid:
+            _, bl_lo, bl_hi = bootstrap_mean_ci_95(bl_valid)
+        if ab_valid:
+            _, ab_lo, ab_hi = bootstrap_mean_ci_95(ab_valid)
 
-            bl_valid = [a for a in baseline_accs if a is not None]
-            ab_valid = [a for a in ablation_accs if a is not None]
-
-            all_results.append({
-                "scene": scene,
-                "texture": texture,
-                "baseline_mean_acc": float(np.mean(bl_valid)) if bl_valid else None,
-                "baseline_std_acc": float(np.std(bl_valid)) if bl_valid else None,
-                "ablation_mean_acc": float(np.mean(ab_valid)) if ab_valid else None,
-                "ablation_std_acc": float(np.std(ab_valid)) if ab_valid else None,
-                "baseline_metrics": _average_metrics(baseline_metrics_frames),
-                "ablation_metrics": _average_metrics(ablation_metrics_frames),
-            })
+        all_results.append({
+            "scene": scene,
+            "texture": texture,
+            "baseline_mean_acc": float(np.mean(bl_valid)) if bl_valid else None,
+            "baseline_ci95_low": bl_lo,
+            "baseline_ci95_high": bl_hi,
+            "ablation_mean_acc": float(np.mean(ab_valid)) if ab_valid else None,
+            "ablation_ci95_low": ab_lo,
+            "ablation_ci95_high": ab_hi,
+            "baseline_metrics": _average_metrics(baseline_metrics_frames),
+            "ablation_metrics": _average_metrics(ablation_metrics_frames),
+        })
 
     # ------------------------------------------------------------------
     # Overall summary
@@ -304,15 +363,27 @@ def main() -> None:
     bl_all = [r["baseline_mean_acc"] for r in all_results if r["baseline_mean_acc"] is not None]
     ab_all = [r["ablation_mean_acc"] for r in all_results if r["ablation_mean_acc"] is not None]
 
+    def _acc_ci_block(vals: list[float]) -> dict | None:
+        if not vals:
+            return None
+        m, lo, hi = bootstrap_mean_ci_95(vals)
+        return {
+            "mean": m,
+            "ci95_low": lo,
+            "ci95_high": hi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+        }
+
     summary: dict = {
         "baseline": {
             "n": len(bl_all),
-            "accuracy": {"mean": float(np.mean(bl_all)), "std": float(np.std(bl_all))} if bl_all else None,
+            "accuracy": _acc_ci_block(bl_all),
             "metrics": _metrics_summary(all_results, "baseline_metrics"),
         },
         "ablation": {
             "n": len(ab_all),
-            "accuracy": {"mean": float(np.mean(ab_all)), "std": float(np.std(ab_all))} if ab_all else None,
+            "accuracy": _acc_ci_block(ab_all),
             "metrics": _metrics_summary(all_results, "ablation_metrics"),
         },
     }
@@ -325,11 +396,15 @@ def main() -> None:
 
     if paired_bl and paired_ab:
         diff = np.array(paired_bl) - np.array(paired_ab)
+        md, dlo, dhi = bootstrap_mean_ci_95(diff)
         t_stat, p_value = stats.ttest_rel(paired_bl, paired_ab)
         summary["paired_comparison"] = {
             "n": len(paired_bl),
-            "mean_diff": float(np.mean(diff)),
-            "std_diff": float(np.std(diff)),
+            "mean_diff": md,
+            "diff_ci95_low": dlo,
+            "diff_ci95_high": dhi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
             "baseline_wins": int(np.sum(diff > 0)),
             "ablation_wins": int(np.sum(diff < 0)),
             "t_stat": float(t_stat),
@@ -360,25 +435,42 @@ def main() -> None:
         })
     summary["by_scene"] = scene_breakdown
 
-    # Per-texture breakdown
-    by_texture: dict[str, dict[str, list]] = defaultdict(lambda: {"baseline": [], "ablation": []})
+    # Per-texture breakdown (accuracy + mean Jaccard per combo, averaged over scenes)
+    by_texture: dict[str, dict[str, list]] = defaultdict(
+        lambda: {"baseline": [], "ablation": [], "baseline_j": [], "ablation_j": []}
+    )
     for r in all_results:
+        tex = r["texture"]
         if r["baseline_mean_acc"] is not None:
-            by_texture[r["texture"]]["baseline"].append(r["baseline_mean_acc"])
+            by_texture[tex]["baseline"].append(r["baseline_mean_acc"])
         if r["ablation_mean_acc"] is not None:
-            by_texture[r["texture"]]["ablation"].append(r["ablation_mean_acc"])
+            by_texture[tex]["ablation"].append(r["ablation_mean_acc"])
+        bm = r.get("baseline_metrics")
+        if bm and bm.get("jaccard") is not None:
+            by_texture[tex]["baseline_j"].append(float(bm["jaccard"]))
+        am = r.get("ablation_metrics")
+        if am and am.get("jaccard") is not None:
+            by_texture[tex]["ablation_j"].append(float(am["jaccard"]))
 
     texture_breakdown = []
     for tex in sorted(by_texture):
-        bl = by_texture[tex]["baseline"]
-        ab = by_texture[tex]["ablation"]
+        d = by_texture[tex]
+        bl = d["baseline"]
+        ab = d["ablation"]
+        blj = d["baseline_j"]
+        abj = d["ablation_j"]
         bl_mean = float(np.mean(bl)) if bl else None
         ab_mean = float(np.mean(ab)) if ab else None
+        bl_j_mean = float(np.mean(blj)) if blj else None
+        ab_j_mean = float(np.mean(abj)) if abj else None
         delta = (bl_mean - ab_mean) if (bl_mean is not None and ab_mean is not None) else None
         texture_breakdown.append({
-            "texture": tex, "n": len(bl),
+            "texture": tex,
+            "n": len(bl) or len(ab),
             "baseline_mean": bl_mean,
             "ablation_mean": ab_mean,
+            "baseline_jaccard_mean": bl_j_mean,
+            "ablation_jaccard_mean": ab_j_mean,
             "delta": delta,
         })
     summary["by_texture"] = texture_breakdown
@@ -392,7 +484,6 @@ def main() -> None:
     json_path = os.path.join(output_dir, "gestalt_ablation_comparison.json")
     with open(json_path, "w") as f:
         json.dump(summary, f, indent=2, default=_safe_float)
-    print(f"\nJSON saved to {json_path}")
 
     # ------------------------------------------------------------------
     # Write CSV (one row per scene/texture combination)
@@ -424,12 +515,16 @@ def main() -> None:
                 for mk in metric_keys:
                     row[f"{prefix}_{mk}"] = m[mk] if m else None
             writer.writerow(row)
-    print(f"CSV  saved to {csv_path}")
 
     # ------------------------------------------------------------------
     # Print summary table to stdout
     # ------------------------------------------------------------------
     _print_summary(summary)
+    tw = _term_styles()
+    print(
+        f"{tw['dim']}Wrote {json_path}  ·  {csv_path}{tw['reset']}\n"
+    )
+    return True
 
 
 def _metrics_summary(all_results: list[dict], key: str) -> dict | None:
@@ -439,70 +534,135 @@ def _metrics_summary(all_results: list[dict], key: str) -> dict | None:
     out = {}
     for mk in metrics_list[0]:
         vals = [m[mk] for m in metrics_list]
-        out[mk] = {"mean": float(np.mean(vals)), "std": float(np.std(vals))}
+        m, lo, hi = bootstrap_mean_ci_95(vals)
+        out[mk] = {
+            "mean": m,
+            "ci95_low": lo,
+            "ci95_high": hi,
+            "bootstrap_n": BOOTSTRAP_N_SAMPLES,
+            "bootstrap_seed": BOOTSTRAP_RANDOM_SEED,
+        }
     return out
 
 
 def _print_summary(summary: dict) -> None:
-    w = 70
+    t = _term_styles()
+    sep = "=" * 72
+    w = 18
+
+    bl_m = summary["baseline"].get("metrics") or {}
+    ab_m = summary["ablation"].get("metrics") or {}
+    bl_j = bl_m.get("jaccard", {})
+    ab_j = ab_m.get("jaccard", {})
+
+    bl_acc = summary["baseline"].get("accuracy")
+    ab_acc = summary["ablation"].get("accuracy")
+
+    bl_j_mean = bl_j.get("mean") if bl_j else None
+    ab_j_mean = ab_j.get("mean") if ab_j else None
+    if bl_j_mean is not None and ab_j_mean is not None:
+        best_jacc = "baseline" if bl_j_mean >= ab_j_mean else "ablation"
+    elif bl_j_mean is not None:
+        best_jacc = "baseline"
+    elif ab_j_mean is not None:
+        best_jacc = "ablation"
+    else:
+        best_jacc = None
+
     print()
-    print("=" * w)
-    print("SUMMARY: BASELINE vs DEPTH ABLATION")
-    print("=" * w)
+    print(sep)
+    print(f"{t['cyan']}{t['bold']}Depth ablation — final results{t['reset']}")
+    print(sep)
 
     for tag, label in [("baseline", "Baseline (full depth)"), ("ablation", "Ablation (no depth)")]:
         s = summary[tag]
         acc = s["accuracy"]
+        m = s.get("metrics") or {}
+        jm = m.get("jaccard", {})
         if acc is None:
-            print(f"\n{label}: no data")
+            print(f"\n{t['dim']}{label}: no data{t['reset']}")
             continue
-        print(f"\n{label} (N={s['n']}):")
-        print(f"  Accuracy: {acc['mean']:.4f} +/- {acc['std']:.4f}")
-        m = s.get("metrics")
-        if m:
-            for mk in ("precision", "recall", "f1", "jaccard"):
-                print(f"  {mk.capitalize():>10}: {m[mk]['mean']:.4f} +/- {m[mk]['std']:.4f}")
+        hdr = f"{label} (N={s['n']})"
+        is_best = tag == best_jacc and best_jacc is not None
+        if is_best and jm:
+            hdr = f"{t['bold']}{t['green']}{hdr}{t['reset']}"
+        print(f"\n{hdr}")
+        acc_s = _fmt_ci(acc["mean"], acc.get("ci95_low"), acc.get("ci95_high"))
+        jac_s = (
+            _fmt_ci(jm.get("mean"), jm.get("ci95_low"), jm.get("ci95_high"))
+            if jm
+            else "N/A"
+        )
+        if is_best and jm:
+            print(f"  Accuracy: {t['bold']}{t['green']}{acc_s}{t['reset']}")
+            print(f"  Jaccard:  {t['bold']}{t['green']}{jac_s}{t['reset']}")
+        else:
+            print(f"  Accuracy: {acc_s}")
+            print(f"  Jaccard:  {jac_s}")
 
     pc = summary.get("paired_comparison")
     if pc:
-        print(f"\n{'=' * w}")
-        print(f"PAIRED COMPARISON (N={pc['n']})")
-        print(f"{'=' * w}")
-        print(f"  Mean accuracy difference: {pc['mean_diff']:.4f} +/- {pc['std_diff']:.4f}")
-        print(f"  Baseline wins: {pc['baseline_wins']}, Ablation wins: {pc['ablation_wins']}")
-        print(f"  t-test: t={pc['t_stat']:.4f}, p={pc['p_value']:.6f}")
+        print(f"\n{sep}")
+        print(f"{t['yellow']}{t['bold']}Paired comparison (accuracy){t['reset']}")
+        print(t["dim"] + sep + t["reset"])
+        print(
+            f"  Δmean={pc['mean_diff']:+.4f} [{pc['diff_ci95_low']:+.4f}, {pc['diff_ci95_high']:+.4f}]  ·  "
+            f"wins: baseline {pc['baseline_wins']} / ablation {pc['ablation_wins']}  ·  "
+            f"t={pc['t_stat']:.4f}, p={pc['p_value']:.6f}"
+        )
         if pc.get("pct_drop") is not None:
-            print(f"  Performance drop: {pc['pct_drop']:.2f}%")
+            print(f"  {t['dim']}Rel. Δ accuracy: {pc['pct_drop']:.2f}%{t['reset']}")
 
-    # Per-scene table
-    by_scene = summary.get("by_scene", [])
-    if by_scene:
-        print(f"\n{'=' * w}")
-        print("PER-SCENE BREAKDOWN")
-        print(f"{'=' * w}")
-        print(f"{'Scene':<15} {'N':>4} {'Baseline':>10} {'Ablation':>10} {'Delta':>8}")
-        print("-" * w)
-        for row in by_scene:
-            bl_str = f"{row['baseline_mean']:.3f}" if row["baseline_mean"] is not None else "N/A"
-            ab_str = f"{row['ablation_mean']:.3f}" if row["ablation_mean"] is not None else "N/A"
-            d_str = f"{row['delta']:.3f}" if row["delta"] is not None else "N/A"
-            print(f"{row['scene']:<15} {row['n']:>4} {bl_str:>10} {ab_str:>10} {d_str:>8}")
-
-    # Per-texture table
+    # Per-texture only (accuracy + Jaccard); no per-scene table
     by_tex = summary.get("by_texture", [])
     if by_tex:
-        print(f"\n{'=' * w}")
-        print("PER-TEXTURE BREAKDOWN")
-        print(f"{'=' * w}")
-        print(f"{'Texture':<15} {'N':>4} {'Baseline':>10} {'Ablation':>10} {'Delta':>8}")
-        print("-" * w)
+        print(f"\n{sep}")
+        print(f"{t['cyan']}{t['bold']}Per-texture breakdown{t['reset']}")
+        print(sep)
+        hdr = (
+            f"{t['magenta']}{'Texture':<14} {'n':>3}  "
+            f"{'B.Acc':>{w}} {'B.Jac':>{w}} {'A.Acc':>{w}} {'A.Jac':>{w}}{t['reset']}"
+        )
+        print(hdr)
+        print(t["dim"] + "-" * 72 + t["reset"])
         for row in by_tex:
-            bl_str = f"{row['baseline_mean']:.3f}" if row["baseline_mean"] is not None else "N/A"
-            ab_str = f"{row['ablation_mean']:.3f}" if row["ablation_mean"] is not None else "N/A"
-            d_str = f"{row['delta']:.3f}" if row["delta"] is not None else "N/A"
-            print(f"{row['texture']:<15} {row['n']:>4} {bl_str:>10} {ab_str:>10} {d_str:>8}")
+            tex = row["texture"]
+            n = row["n"]
+            bl_acc_m = row.get("baseline_mean")
+            ab_acc_m = row.get("ablation_mean")
+            b_jac = row.get("baseline_jaccard_mean")
+            a_jac = row.get("ablation_jaccard_mean")
+            b_acc_s = f"{bl_acc_m:.4f}" if bl_acc_m is not None else "N/A"
+            a_acc_s = f"{ab_acc_m:.4f}" if ab_acc_m is not None else "N/A"
+            b_j_s = f"{b_jac:.4f}" if b_jac is not None else "N/A"
+            a_j_s = f"{a_jac:.4f}" if a_jac is not None else "N/A"
+            bj = float(b_jac) if b_jac is not None else float("nan")
+            aj = float(a_jac) if a_jac is not None else float("nan")
+            if not np.isnan(bj) and not np.isnan(aj):
+                jac_best = 0 if bj >= aj else 1
+            elif not np.isnan(bj):
+                jac_best = 0
+            elif not np.isnan(aj):
+                jac_best = 1
+            else:
+                jac_best = -1
+
+            def _fmt_cell(val: str, *, highlight: bool) -> str:
+                if val == "N/A" or not highlight:
+                    return f"{val:>{w}}"
+                return f"{t['bold']}{t['green']}{val:>{w}}{t['reset']}"
+
+            print(
+                f"{tex:<14} {n:>3}  "
+                f"{b_acc_s:>{w}} {_fmt_cell(b_j_s, highlight=jac_best == 0)} "
+                f"{a_acc_s:>{w}} {_fmt_cell(a_j_s, highlight=jac_best == 1)}"
+            )
 
     print()
+
+
+def main() -> None:
+    run_gestalt_ablation_postprocess()
 
 
 if __name__ == "__main__":

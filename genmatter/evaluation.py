@@ -1,5 +1,5 @@
 """
-Evaluation metrics for GenParticles tracking.
+Evaluation metrics for GenMatter tracking.
 
 This module computes multiple metrics for evaluating particle-based tracking:
 
@@ -8,33 +8,13 @@ This module computes multiple metrics for evaluating particle-based tracking:
    - Used for visualization and understanding per-particle behavior
    - LIMITATION: Treats all particles equally, sensitive to boundary particles
 
-2. Matter-Weighted Recall/Precision/F1 metrics (TWO VARIANTS - RECOMMENDED):
+2. Matter-weighted metrics (**fixed frame-0 blob weights**) — reported DAVIS primary metrics:
 
-   a) FIXED-WEIGHT Matter Metrics (avg_matter_weighted_f1_fixed):
-      - Uses blob weights from frame 0 only, held constant across all frames
-      - RECOMMENDED for fair comparison with point trackers (CoTracker, TAP-Net, TAPIR, etc.)
-      - Point trackers have no concept of evolving importance/confidence
-      - Both systems evaluated on same initial matter distribution
-      - Use this metric in papers/benchmarks when comparing across methods
+   - ``avg_matter_weighted_recall_fixed``, ``avg_matter_weighted_precision_fixed``,
+     ``avg_matter_weighted_jaccard_fixed`` (and optional accuracy).
+   - Unweighted fractional scores may still be computed internally for ROC AUC.
 
-      To compare with point trackers:
-      1. Initialize point tracker with blob_means from frame 0 after initial Gibbs
-      2. Use frame 0 blob_weights to weight each point
-      3. Compute same matter-weighted recall/precision/F1 for both systems
-      4. This gives a fair apples-to-apples comparison
-
-   b) ADAPTIVE-WEIGHT Matter Metrics (avg_matter_weighted_f1):
-      - Uses per-frame blob weights that evolve during tracking
-      - Shows advantage of probabilistic matter representation
-      - Particles can be downweighted if they drift or become uncertain
-      - Demonstrates that the model learns tracking confidence online
-      - Use this to show benefit of your approach over fixed-point tracking
-
-Both matter-weighted variants:
-- Weight by (pixel_count × blob_weight) to prevent gaming with tiny particles
-- Compute matter-weighted TP/FP/FN for balanced recall/precision
-- F1 score provides single metric balancing both
-- Naturally emphasizes spatially important particles over boundary particles
+Matter-weighted variants weight by (pixel_count × blob_weight) so larger spatial support dominates.
 """
 
 import os
@@ -66,7 +46,7 @@ def get_segmentation_mask(davis_name, frame_idx, annotations_path, img_dims = No
 
 
 def evaluate_tracking_results(
-    davis_genparticles_dict, 
+    davis_genmatter_dict, 
     annotations_path,
     counting_threshold=100, 
     img_dims=(520, 960), 
@@ -75,10 +55,10 @@ def evaluate_tracking_results(
     experiment_name="tracking_evaluation"
 ):
     """
-    Evaluate tracking results for multiple GenParticles runs with different random trials across multiple DAVIS datasets.
+    Evaluate tracking results for multiple GenMatter runs with different random trials across multiple DAVIS datasets.
 
     Args:
-        davis_genparticles_dict: Dictionary where keys are davis_names and values are lists of lists.
+        davis_genmatter_dict: Dictionary where keys are davis_names and values are lists of lists.
             Each outer list is for a different random trial, each inner list is over all frames.
             Each element is a dict with 'n_blobs' and 'blob_assignments'.
         annotations_path: Path to the DAVIS annotations
@@ -108,7 +88,7 @@ def evaluate_tracking_results(
     all_datasets_results = {}
     
     # Process each dataset
-    for davis_name, multiple_genparticles_list in davis_genparticles_dict.items():
+    for davis_name, multiple_genmatter_list in davis_genmatter_dict.items():
         # Get first frame segmentation mask
         first_frame_mask = get_segmentation_mask(davis_name, 0, annotations_path, img_dims, flatten=False)
         
@@ -116,7 +96,7 @@ def evaluate_tracking_results(
         all_trials_data = []
         
         # Process each trial
-        for trial_idx, per_trial_list in enumerate(multiple_genparticles_list):
+        for trial_idx, per_trial_list in enumerate(multiple_genmatter_list):
             # per_trial_list: list over frames, each is a dict with 'n_blobs' and 'blob_assignments'
             num_frames = len(per_trial_list)
             
@@ -198,7 +178,7 @@ def evaluate_tracking_results(
 
 def evaluate_single_davis_video(
     davis_name,
-    multiple_genparticles_list,
+    multiple_genmatter_list,
     annotations_path,
     counting_threshold=0,
     img_dims=(520, 960),
@@ -246,12 +226,12 @@ def evaluate_single_davis_video(
     per_frame_fpr_all_trials = []
     per_frame_jaccard_all_trials = []
     per_frame_accuracy_all_trials = []
-    per_frame_matter_weighted_f1_all_trials = []
-    per_frame_matter_weighted_f1_fixed_all_trials = []
-    per_frame_matter_weighted_accuracy_all_trials = []
+    per_frame_matter_weighted_recall_fixed_all_trials = []
+    per_frame_matter_weighted_precision_fixed_all_trials = []
+    per_frame_matter_weighted_jaccard_fixed_all_trials = []
     per_frame_matter_weighted_accuracy_fixed_all_trials = []
 
-    for trial_idx, per_trial_list in enumerate(multiple_genparticles_list):
+    for trial_idx, per_trial_list in enumerate(multiple_genmatter_list):
         num_frames = len(per_trial_list)
         first_frame_assignments = np.array(per_trial_list[0]['blob_assignments'])
         
@@ -295,15 +275,9 @@ def evaluate_single_davis_video(
         jaccard_scores = np.zeros(num_frames)
         accuracy_scores = np.zeros(num_frames)
 
-        # Matter-weighted metrics (adaptive and fixed variants)
-        matter_weighted_recall_scores = np.zeros(num_frames)
-        matter_weighted_precision_scores = np.zeros(num_frames)
-        matter_weighted_f1_scores = np.zeros(num_frames)
-        matter_weighted_jaccard_scores = np.zeros(num_frames)
-        matter_weighted_accuracy_scores = np.zeros(num_frames)
+        # Matter-weighted fixed (frame-0 blob weights): recall, precision, Jaccard, accuracy
         matter_weighted_recall_fixed_scores = np.zeros(num_frames)
         matter_weighted_precision_fixed_scores = np.zeros(num_frames)
-        matter_weighted_f1_fixed_scores = np.zeros(num_frames)
         matter_weighted_jaccard_fixed_scores = np.zeros(num_frames)
         matter_weighted_accuracy_fixed_scores = np.zeros(num_frames)
 
@@ -366,130 +340,17 @@ def evaluate_single_davis_video(
             tpr_values.append(recall_scores[frame_idx])
             fpr_values.append(fpr_scores[frame_idx])
 
-            # ========================================================================
-            # Matter-Weighted Recall/Precision/F1/Jaccard/Accuracy Metrics (Two Variants)
-            # ========================================================================
-            # These metrics address the limitation that unweighted particle-level
-            # accuracy treats all particles equally, making results too sensitive to
-            # boundary particles with few pixels.
-            #
-            # KEY INSIGHT: Not all particles represent equal "matter" or importance.
-            # A particle could have:
-            #   - High weight + 1 pixel (trivially correct but not spatially important)
-            #   - Low weight + 1000 pixels (spatially important but downweighted)
-            #
-            # SOLUTION: Weight each particle's TP/FP/FN/TN contribution by its "matter":
-            #   matter_weight = pixel_count × blob_weight
-            #
-            # This prevents gaming (can't get perfect score with 1 tiny particle) and
-            # naturally emphasizes spatially important particles.
-            #
-            # We compute TWO variants for different evaluation purposes:
-            #
-            # 1. FIXED-WEIGHT MATTER METRICS (frame 0 weights only)
-            #    - Uses blob weights from frame 0, held constant across all frames
-            #    - RECOMMENDED for fair comparison with point trackers
-            #    - Point trackers (CoTracker, TAP-Net, TAPIR) have no evolving importance
-            #    - Both systems evaluated on same initial matter distribution
-            #    - Use this for cross-method comparisons in papers/benchmarks
-            #
-            #    To compare with point trackers:
-            #    a) Initialize point tracker with blob_means from frame 0 (post-Gibbs)
-            #    b) Weight each point by frame 0 blob_weight for that particle
-            #    c) Compute same matter-weighted recall/precision/accuracy for both systems
-            #    d) This gives a fair apples-to-apples comparison
-            #
-            # 2. ADAPTIVE-WEIGHT MATTER METRICS (per-frame weights)
-            #    - Uses per-frame blob weights that evolve during tracking
-            #    - Shows advantage of probabilistic matter representation
-            #    - Particles can be downweighted if they drift or become uncertain
-            #    - Demonstrates that the model learns tracking confidence online
-            #    - Use this to show benefit of your approach over fixed-point tracking
-            #
-            # METRICS COMPUTED:
-            # - Matter-weighted Recall: What fraction of object matter stays in GT mask?
-            #   recall = sum(TP_matter) / sum(TP_matter + FN_matter)
-            #
-            # - Matter-weighted Precision: What fraction of predicted matter is correct?
-            #   precision = sum(TP_matter) / sum(TP_matter + FP_matter)
-            #
-            # - Matter-weighted Accuracy: What fraction of all matter is correctly classified?
-            #   accuracy = sum(TP_matter + TN_matter) / sum(TP_matter + TN_matter + FP_matter + FN_matter)
-            #
-            # - Matter-weighted F1: Harmonic mean balancing recall and precision
-            #   f1 = 2 * (recall × precision) / (recall + precision)
-            #
-            # - Matter-weighted Jaccard (IoU): Intersection over Union for matter
-            #   jaccard = sum(TP_matter) / sum(TP_matter + FP_matter + FN_matter)
-            #
-            # These metrics are balanced (penalize both FP and FN) and prevent exploits.
-            # ========================================================================
-
-            # Get blob weights for this frame (adaptive) and frame 0 (fixed)
-            particle_blob_weights_adaptive = np.array([frame_blob_weights[p] if p < len(frame_blob_weights) else 0.0
-                                                       for p in unique_particles])
-
-            # On first frame, cache the frame 0 weights for fixed-weight metric
+            # Matter-weighted metrics with frame-0 blob weights (DAVIS benchmark suite).
+            # matter_weight = pixel_count × blob_weight (frame 0).
             if frame_idx == 0:
                 frame0_blob_weights = frame_blob_weights.copy()
 
-            particle_blob_weights_fixed = np.array([frame0_blob_weights[p] if p < len(frame0_blob_weights) else 0.0
-                                                    for p in unique_particles])
-
-            # Compute matter weights for both variants
-            # Matter weight = pixel_count × blob_weight (prevents 1-pixel exploit)
-            matter_weight_adaptive = total_particle_pixels * particle_blob_weights_adaptive
+            particle_blob_weights_fixed = np.array([
+                frame0_blob_weights[p] if p < len(frame0_blob_weights) else 0.0
+                for p in unique_particles
+            ])
             matter_weight_fixed = total_particle_pixels * particle_blob_weights_fixed
 
-            # Compute matter-weighted TP/FP/FN/TN counts
-            # fraction_inside[i] = fraction of particle i's pixels inside GT mask
-            # fraction_outside[i] = fraction of particle i's pixels outside GT mask
-            # ref_particle_mask[i] = True if particle i is a reference (object) particle
-
-            # TP matter: Reference particles' pixels that are inside GT mask
-            # FN matter: Reference particles' pixels that are outside GT mask
-            # FP matter: Non-reference particles' pixels that are inside GT mask
-            # TN matter: Non-reference particles' pixels that are outside GT mask
-
-            # ADAPTIVE-WEIGHT METRICS
-            tp_matter_adaptive = np.sum(fraction_inside[ref_particle_mask] * matter_weight_adaptive[ref_particle_mask])
-            fn_matter_adaptive = np.sum(fraction_outside[ref_particle_mask] * matter_weight_adaptive[ref_particle_mask])
-            fp_matter_adaptive = np.sum(fraction_inside[~ref_particle_mask] * matter_weight_adaptive[~ref_particle_mask])
-            tn_matter_adaptive = np.sum(fraction_outside[~ref_particle_mask] * matter_weight_adaptive[~ref_particle_mask])
-
-            if (tp_matter_adaptive + fn_matter_adaptive) > 0:
-                matter_weighted_recall_scores[frame_idx] = tp_matter_adaptive / (tp_matter_adaptive + fn_matter_adaptive)
-            else:
-                matter_weighted_recall_scores[frame_idx] = 0.0
-
-            if (tp_matter_adaptive + fp_matter_adaptive) > 0:
-                matter_weighted_precision_scores[frame_idx] = tp_matter_adaptive / (tp_matter_adaptive + fp_matter_adaptive)
-            else:
-                matter_weighted_precision_scores[frame_idx] = 0.0
-
-            # Accuracy score
-            total_matter_adaptive = tp_matter_adaptive + tn_matter_adaptive + fp_matter_adaptive + fn_matter_adaptive
-            if total_matter_adaptive > 0:
-                matter_weighted_accuracy_scores[frame_idx] = (tp_matter_adaptive + tn_matter_adaptive) / total_matter_adaptive
-            else:
-                matter_weighted_accuracy_scores[frame_idx] = 0.0
-
-            # F1 score (harmonic mean of recall and precision)
-            recall_val = matter_weighted_recall_scores[frame_idx]
-            precision_val = matter_weighted_precision_scores[frame_idx]
-            if (recall_val + precision_val) > 0:
-                matter_weighted_f1_scores[frame_idx] = 2 * (recall_val * precision_val) / (recall_val + precision_val)
-            else:
-                matter_weighted_f1_scores[frame_idx] = 0.0
-
-            # Jaccard (IoU) score
-            union_matter_adaptive = tp_matter_adaptive + fp_matter_adaptive + fn_matter_adaptive
-            if union_matter_adaptive > 0:
-                matter_weighted_jaccard_scores[frame_idx] = tp_matter_adaptive / union_matter_adaptive
-            else:
-                matter_weighted_jaccard_scores[frame_idx] = 0.0
-
-            # FIXED-WEIGHT METRICS (for fair comparison with point trackers)
             tp_matter_fixed = np.sum(fraction_inside[ref_particle_mask] * matter_weight_fixed[ref_particle_mask])
             fn_matter_fixed = np.sum(fraction_outside[ref_particle_mask] * matter_weight_fixed[ref_particle_mask])
             fp_matter_fixed = np.sum(fraction_inside[~ref_particle_mask] * matter_weight_fixed[~ref_particle_mask])
@@ -505,31 +366,18 @@ def evaluate_single_davis_video(
             else:
                 matter_weighted_precision_fixed_scores[frame_idx] = 0.0
 
-            # Accuracy score
             total_matter_fixed = tp_matter_fixed + tn_matter_fixed + fp_matter_fixed + fn_matter_fixed
             if total_matter_fixed > 0:
                 matter_weighted_accuracy_fixed_scores[frame_idx] = (tp_matter_fixed + tn_matter_fixed) / total_matter_fixed
             else:
                 matter_weighted_accuracy_fixed_scores[frame_idx] = 0.0
 
-            # F1 score
-            recall_val_fixed = matter_weighted_recall_fixed_scores[frame_idx]
-            precision_val_fixed = matter_weighted_precision_fixed_scores[frame_idx]
-            if (recall_val_fixed + precision_val_fixed) > 0:
-                matter_weighted_f1_fixed_scores[frame_idx] = 2 * (recall_val_fixed * precision_val_fixed) / (recall_val_fixed + precision_val_fixed)
-            else:
-                matter_weighted_f1_fixed_scores[frame_idx] = 0.0
-
-            # Jaccard (IoU) score
             union_matter_fixed = tp_matter_fixed + fp_matter_fixed + fn_matter_fixed
             if union_matter_fixed > 0:
                 matter_weighted_jaccard_fixed_scores[frame_idx] = tp_matter_fixed / union_matter_fixed
             else:
                 matter_weighted_jaccard_fixed_scores[frame_idx] = 0.0
         
-        avg_recall = float(np.mean(recall_scores))
-        std_recall = float(np.std(recall_scores))
-
         if len(tpr_values) > 1 and len(set(fpr_values)) > 1:
             sorted_indices = np.argsort(fpr_values)
             sorted_fpr = np.array(fpr_values)[sorted_indices]
@@ -539,23 +387,11 @@ def evaluate_single_davis_video(
             auc_roc = 0.0
 
         trial_data = {
-            'avg_recall': avg_recall,
-            'std_recall': std_recall,
-            'avg_precision': float(np.mean(precision_scores)),
-            'avg_fpr': float(np.mean(fpr_scores)),
-            'avg_jaccard': float(np.mean(jaccard_scores)),
-            'avg_accuracy': float(np.mean(accuracy_scores)),
-            'avg_matter_weighted_recall': float(np.mean(matter_weighted_recall_scores)),
-            'avg_matter_weighted_precision': float(np.mean(matter_weighted_precision_scores)),
-            'avg_matter_weighted_f1': float(np.mean(matter_weighted_f1_scores)),
-            'avg_matter_weighted_jaccard': float(np.mean(matter_weighted_jaccard_scores)),
-            'avg_matter_weighted_accuracy': float(np.mean(matter_weighted_accuracy_scores)),
             'avg_matter_weighted_recall_fixed': float(np.mean(matter_weighted_recall_fixed_scores)),
             'avg_matter_weighted_precision_fixed': float(np.mean(matter_weighted_precision_fixed_scores)),
-            'avg_matter_weighted_f1_fixed': float(np.mean(matter_weighted_f1_fixed_scores)),
             'avg_matter_weighted_jaccard_fixed': float(np.mean(matter_weighted_jaccard_fixed_scores)),
             'avg_matter_weighted_accuracy_fixed': float(np.mean(matter_weighted_accuracy_fixed_scores)),
-            'auc_roc': float(auc_roc)
+            'auc_roc': float(auc_roc),
         }
         visualization_data_entry = {
             'per_trial_list': per_trial_list,
@@ -571,15 +407,10 @@ def evaluate_single_davis_video(
             'precision_scores': precision_scores,
             'fpr_scores': fpr_scores,
             'jaccard_scores': jaccard_scores,
+            'iou_scores': jaccard_scores,
             'accuracy_scores': accuracy_scores,
-            'matter_weighted_recall_scores': matter_weighted_recall_scores,
-            'matter_weighted_precision_scores': matter_weighted_precision_scores,
-            'matter_weighted_f1_scores': matter_weighted_f1_scores,
-            'matter_weighted_jaccard_scores': matter_weighted_jaccard_scores,
-            'matter_weighted_accuracy_scores': matter_weighted_accuracy_scores,
             'matter_weighted_recall_fixed_scores': matter_weighted_recall_fixed_scores,
             'matter_weighted_precision_fixed_scores': matter_weighted_precision_fixed_scores,
-            'matter_weighted_f1_fixed_scores': matter_weighted_f1_fixed_scores,
             'matter_weighted_jaccard_fixed_scores': matter_weighted_jaccard_fixed_scores,
             'matter_weighted_accuracy_fixed_scores': matter_weighted_accuracy_fixed_scores,
             'tpr_values': tpr_values,
@@ -587,7 +418,7 @@ def evaluate_single_davis_video(
             'num_frames': num_frames,
             'n_outlier_particles': n_outlier_particles,
             'actual_outlier_pixels': actual_outlier_pixels,
-            'avg_recall': avg_recall
+            'avg_recall': trial_data['avg_matter_weighted_jaccard_fixed'],
         }
         all_visualization_trial_data.append(visualization_data_entry)
         all_trials_data.append(trial_data)
@@ -597,69 +428,44 @@ def evaluate_single_davis_video(
         per_frame_fpr_all_trials.append(fpr_scores)
         per_frame_jaccard_all_trials.append(jaccard_scores)
         per_frame_accuracy_all_trials.append(accuracy_scores)
-        per_frame_matter_weighted_f1_all_trials.append(matter_weighted_f1_scores)
-        per_frame_matter_weighted_f1_fixed_all_trials.append(matter_weighted_f1_fixed_scores)
-        per_frame_matter_weighted_accuracy_all_trials.append(matter_weighted_accuracy_scores)
+        per_frame_matter_weighted_recall_fixed_all_trials.append(matter_weighted_recall_fixed_scores)
+        per_frame_matter_weighted_precision_fixed_all_trials.append(matter_weighted_precision_fixed_scores)
+        per_frame_matter_weighted_jaccard_fixed_all_trials.append(matter_weighted_jaccard_fixed_scores)
         per_frame_matter_weighted_accuracy_fixed_all_trials.append(matter_weighted_accuracy_fixed_scores)
     
-    print(f"\n📈 Trial Results for {davis_name}:")
-    print(f"{'Trial':<8} {'Recall (%)':<12} {'Precision':<10} {'FPR':<8} {'Jaccard':<8} {'Accuracy':<10} {'MW-F1-A':<10} {'MW-F1-F':<10} {'MW-J-A':<8} {'MW-J-F':<8} {'MW-Acc-A':<10} {'MW-Acc-F':<10} {'AUC':<8}")
-    print(f"{'-'*134}")
-    for trial_idx, trial_data in enumerate(all_trials_data):
-        recall_pct = trial_data['avg_recall'] * 100
-        print(f"{trial_idx+1:<8} {recall_pct:<12.2f} "
-              f"{trial_data['avg_precision']:<10.3f} {trial_data['avg_fpr']:<8.3f} "
-              f"{trial_data['avg_jaccard']:<8.3f} {trial_data['avg_accuracy']:<10.3f} "
-              f"{trial_data['avg_matter_weighted_f1']:<10.3f} "
-              f"{trial_data['avg_matter_weighted_f1_fixed']:<10.3f} {trial_data['avg_matter_weighted_jaccard']:<8.3f} "
-              f"{trial_data['avg_matter_weighted_jaccard_fixed']:<8.3f} {trial_data['avg_matter_weighted_accuracy']:<10.3f} "
-              f"{trial_data['avg_matter_weighted_accuracy_fixed']:<10.3f} {trial_data['auc_roc']:<8.3f}")
-    print(f"{'-'*134}")
-    print(f"Note: MW-F1-A = Matter-Weighted F1 (Adaptive weights), MW-F1-F = Matter-Weighted F1 (Fixed frame-0 weights)")
-    print(f"      MW-J-A = Matter-Weighted Jaccard (Adaptive weights), MW-J-F = Matter-Weighted Jaccard (Fixed frame-0 weights)")
-    print(f"      MW-Acc-A = Matter-Weighted Accuracy (Adaptive weights), MW-Acc-F = Matter-Weighted Accuracy (Fixed frame-0 weights)")
-    print(f"      Use MW-F1-F, MW-J-F, and MW-Acc-F for fair comparison with point trackers (CoTracker, TAP-Net, TAPIR, etc.)")
-    print(f"      Use MW-F1-A, MW-J-A, and MW-Acc-A to show benefit of adaptive probabilistic matter representation")
-    print(f"      Both metrics weight by (pixel_count × blob_weight) to emphasize spatially important particles")
+    print(f"\n📈 Trial Results for {davis_name} (matter-weighted, frame-0 blob weights):")
+    print(
+        f"{'Trial':<8} {'MW-R-F':<10} {'MW-P-F':<10} {'MW-J-F':<10} "
+        f"{'MW-Acc-F':<10} {'AUC':<8}"
+    )
+    print(f"{'-'*60}")
+    for trial_i, td in enumerate(all_trials_data):
+        print(
+            f"{trial_i+1:<8} {td['avg_matter_weighted_recall_fixed']:<10.3f} "
+            f"{td['avg_matter_weighted_precision_fixed']:<10.3f} "
+            f"{td['avg_matter_weighted_jaccard_fixed']:<10.3f} "
+            f"{td['avg_matter_weighted_accuracy_fixed']:<10.3f} {td['auc_roc']:<8.3f}"
+        )
+    print(f"{'-'*60}")
 
-    avg_recall_values = [data['avg_recall'] for data in all_trials_data]
-    std_recall_values = [data['std_recall'] for data in all_trials_data]
-    overall_mean = float(np.mean(avg_recall_values))
-    overall_median = float(np.median(avg_recall_values))
-    overall_std = float(np.std(avg_recall_values))
-    mean_std = float(np.mean(std_recall_values))
-    avg_precision_values = [data['avg_precision'] for data in all_trials_data]
-    avg_fpr_values = [data['avg_fpr'] for data in all_trials_data]
-    avg_jaccard_values = [data['avg_jaccard'] for data in all_trials_data]
-    avg_accuracy_values = [data['avg_accuracy'] for data in all_trials_data]
-    avg_matter_weighted_f1_values = [data['avg_matter_weighted_f1'] for data in all_trials_data]
-    avg_matter_weighted_f1_fixed_values = [data['avg_matter_weighted_f1_fixed'] for data in all_trials_data]
-    avg_matter_weighted_jaccard_values = [data['avg_matter_weighted_jaccard'] for data in all_trials_data]
-    avg_matter_weighted_jaccard_fixed_values = [data['avg_matter_weighted_jaccard_fixed'] for data in all_trials_data]
-    avg_matter_weighted_accuracy_values = [data['avg_matter_weighted_accuracy'] for data in all_trials_data]
-    avg_matter_weighted_accuracy_fixed_values = [data['avg_matter_weighted_accuracy_fixed'] for data in all_trials_data]
-    auc_roc_values = [data['auc_roc'] for data in all_trials_data]
+    avg_matter_weighted_jaccard_fixed_values = [d['avg_matter_weighted_jaccard_fixed'] for d in all_trials_data]
+    avg_matter_weighted_recall_fixed_values = [d['avg_matter_weighted_recall_fixed'] for d in all_trials_data]
+    avg_matter_weighted_precision_fixed_values = [d['avg_matter_weighted_precision_fixed'] for d in all_trials_data]
+    avg_matter_weighted_accuracy_fixed_values = [d['avg_matter_weighted_accuracy_fixed'] for d in all_trials_data]
+    auc_roc_values = [d['auc_roc'] for d in all_trials_data]
 
-    recall_mean = float(np.mean(avg_recall_values))
-    precision_mean = float(np.mean(avg_precision_values))
-    fpr_mean = float(np.mean(avg_fpr_values))
-    jaccard_mean = float(np.mean(avg_jaccard_values))
-    accuracy_mean = float(np.mean(avg_accuracy_values))
-    matter_weighted_f1_mean = float(np.mean(avg_matter_weighted_f1_values))
-    matter_weighted_f1_fixed_mean = float(np.mean(avg_matter_weighted_f1_fixed_values))
-    matter_weighted_jaccard_mean = float(np.mean(avg_matter_weighted_jaccard_values))
     matter_weighted_jaccard_fixed_mean = float(np.mean(avg_matter_weighted_jaccard_fixed_values))
-    matter_weighted_accuracy_mean = float(np.mean(avg_matter_weighted_accuracy_values))
+    matter_weighted_recall_fixed_mean = float(np.mean(avg_matter_weighted_recall_fixed_values))
+    matter_weighted_precision_fixed_mean = float(np.mean(avg_matter_weighted_precision_fixed_values))
     matter_weighted_accuracy_fixed_mean = float(np.mean(avg_matter_weighted_accuracy_fixed_values))
     auc_roc_mean = float(np.mean(auc_roc_values))
-    recall_pct = recall_mean * 100
-    print(f"{'Mean':<8} {recall_pct:<12.2f} "
-          f"{precision_mean:<10.3f} {fpr_mean:<8.3f} "
-          f"{jaccard_mean:<8.3f} {accuracy_mean:<10.3f} "
-          f"{matter_weighted_f1_mean:<10.3f} "
-          f"{matter_weighted_f1_fixed_mean:<10.3f} {matter_weighted_jaccard_mean:<8.3f} "
-          f"{matter_weighted_jaccard_fixed_mean:<8.3f} {matter_weighted_accuracy_mean:<10.3f} "
-          f"{matter_weighted_accuracy_fixed_mean:<10.3f} {auc_roc_mean:<8.3f}")
+    print(
+        f"{'Mean':<8} {matter_weighted_recall_fixed_mean:<10.3f} "
+        f"{matter_weighted_precision_fixed_mean:<10.3f} "
+        f"{matter_weighted_jaccard_fixed_mean:<10.3f} "
+        f"{matter_weighted_accuracy_fixed_mean:<10.3f} {auc_roc_mean:<8.3f}"
+    )
+    print("Note: MW-*-F = matter-weighted recall / precision / Jaccard / accuracy (frame-0 weights).")
 
     fps_mean = None
     fps_std = None
@@ -674,9 +480,9 @@ def evaluate_single_davis_video(
     per_frame_fpr_all_trials = np.stack(per_frame_fpr_all_trials, axis=0) if len(per_frame_fpr_all_trials) > 0 else None
     per_frame_jaccard_all_trials = np.stack(per_frame_jaccard_all_trials, axis=0) if len(per_frame_jaccard_all_trials) > 0 else None
     per_frame_accuracy_all_trials = np.stack(per_frame_accuracy_all_trials, axis=0) if len(per_frame_accuracy_all_trials) > 0 else None
-    per_frame_matter_weighted_f1_all_trials = np.stack(per_frame_matter_weighted_f1_all_trials, axis=0) if len(per_frame_matter_weighted_f1_all_trials) > 0 else None
-    per_frame_matter_weighted_f1_fixed_all_trials = np.stack(per_frame_matter_weighted_f1_fixed_all_trials, axis=0) if len(per_frame_matter_weighted_f1_fixed_all_trials) > 0 else None
-    per_frame_matter_weighted_accuracy_all_trials = np.stack(per_frame_matter_weighted_accuracy_all_trials, axis=0) if len(per_frame_matter_weighted_accuracy_all_trials) > 0 else None
+    per_frame_matter_weighted_recall_fixed_all_trials = np.stack(per_frame_matter_weighted_recall_fixed_all_trials, axis=0) if len(per_frame_matter_weighted_recall_fixed_all_trials) > 0 else None
+    per_frame_matter_weighted_precision_fixed_all_trials = np.stack(per_frame_matter_weighted_precision_fixed_all_trials, axis=0) if len(per_frame_matter_weighted_precision_fixed_all_trials) > 0 else None
+    per_frame_matter_weighted_jaccard_fixed_all_trials = np.stack(per_frame_matter_weighted_jaccard_fixed_all_trials, axis=0) if len(per_frame_matter_weighted_jaccard_fixed_all_trials) > 0 else None
     per_frame_matter_weighted_accuracy_fixed_all_trials = np.stack(per_frame_matter_weighted_accuracy_fixed_all_trials, axis=0) if len(per_frame_matter_weighted_accuracy_fixed_all_trials) > 0 else None
 
     # Enhanced visualization: Use the trial with best average recall (not index 0)
@@ -684,19 +490,16 @@ def evaluate_single_davis_video(
     if render_results_video:
         print(f"\n🎬 Creating results video (with particle overlay)...")
         try:
-            # Determine the best trial by max avg_recall
-            best_trial_idx = int(np.argmax([v['avg_recall'] for v in all_visualization_trial_data]))
+            # Best trial by max matter-weighted Jaccard (fixed frame-0 weights)
+            best_trial_idx = int(np.argmax([v['matter_weighted_jaccard_fixed_scores'].mean() for v in all_visualization_trial_data]))
             best_visualization_data = all_visualization_trial_data[best_trial_idx].copy()
-            # Add means and trial info for display in plots, including framewise average metrics
-            best_visualization_data['per_frame_recall_mean']    = np.mean(per_frame_recall_all_trials, axis=0) if per_frame_recall_all_trials is not None else None
-            best_visualization_data['per_frame_precision_mean'] = np.mean(per_frame_precision_all_trials, axis=0) if per_frame_precision_all_trials is not None else None
-            best_visualization_data['per_frame_fpr_mean']       = np.mean(per_frame_fpr_all_trials, axis=0) if per_frame_fpr_all_trials is not None else None
-            best_visualization_data['per_frame_jaccard_mean']   = np.mean(per_frame_jaccard_all_trials, axis=0) if per_frame_jaccard_all_trials is not None else None
-            best_visualization_data['per_frame_accuracy_mean']  = np.mean(per_frame_accuracy_all_trials, axis=0) if per_frame_accuracy_all_trials is not None else None
-            best_visualization_data['per_frame_matter_weighted_f1_mean'] = np.mean(per_frame_matter_weighted_f1_all_trials, axis=0) if per_frame_matter_weighted_f1_all_trials is not None else None
-            best_visualization_data['per_frame_matter_weighted_f1_fixed_mean'] = np.mean(per_frame_matter_weighted_f1_fixed_all_trials, axis=0) if per_frame_matter_weighted_f1_fixed_all_trials is not None else None
-            best_visualization_data['per_frame_matter_weighted_accuracy_mean'] = np.mean(per_frame_matter_weighted_accuracy_all_trials, axis=0) if per_frame_matter_weighted_accuracy_all_trials is not None else None
-            best_visualization_data['per_frame_matter_weighted_accuracy_fixed_mean'] = np.mean(per_frame_matter_weighted_accuracy_fixed_all_trials, axis=0) if per_frame_matter_weighted_accuracy_fixed_all_trials is not None else None
+            best_visualization_data['per_frame_recall_mean'] = np.mean(per_frame_matter_weighted_recall_fixed_all_trials, axis=0) if per_frame_matter_weighted_recall_fixed_all_trials is not None else None
+            best_visualization_data['per_frame_precision_mean'] = np.mean(per_frame_matter_weighted_precision_fixed_all_trials, axis=0) if per_frame_matter_weighted_precision_fixed_all_trials is not None else None
+            best_visualization_data['per_frame_fpr_mean'] = None
+            best_visualization_data['per_frame_jaccard_mean'] = np.mean(per_frame_matter_weighted_jaccard_fixed_all_trials, axis=0) if per_frame_matter_weighted_jaccard_fixed_all_trials is not None else None
+            best_visualization_data['per_frame_iou_mean'] = best_visualization_data['per_frame_jaccard_mean']
+            best_visualization_data['per_frame_accuracy_mean'] = np.mean(per_frame_matter_weighted_accuracy_fixed_all_trials, axis=0) if per_frame_matter_weighted_accuracy_fixed_all_trials is not None else None
+            best_visualization_data['per_frame_matter_weighted_accuracy_fixed_mean'] = best_visualization_data['per_frame_accuracy_mean']
             best_visualization_data['runs_n_trials']            = len(all_trials_data)
             best_visualization_data['selected_trial_idx']       = best_trial_idx
             best_visualization_data['davis_name']               = davis_name
@@ -709,40 +512,16 @@ def evaluate_single_davis_video(
         except Exception as e:
             print(f"⚠️  Could not plot results video due to error: {str(e)}")
 
-    # Compute means for matter-weighted recall and precision separately
-    avg_matter_weighted_recall_values = [data['avg_matter_weighted_recall'] for data in all_trials_data]
-    avg_matter_weighted_precision_values = [data['avg_matter_weighted_precision'] for data in all_trials_data]
-    avg_matter_weighted_recall_fixed_values = [data['avg_matter_weighted_recall_fixed'] for data in all_trials_data]
-    avg_matter_weighted_precision_fixed_values = [data['avg_matter_weighted_precision_fixed'] for data in all_trials_data]
-
-    matter_weighted_recall_mean = float(np.mean(avg_matter_weighted_recall_values))
-    matter_weighted_precision_mean = float(np.mean(avg_matter_weighted_precision_values))
-    matter_weighted_recall_fixed_mean = float(np.mean(avg_matter_weighted_recall_fixed_values))
-    matter_weighted_precision_fixed_mean = float(np.mean(avg_matter_weighted_precision_fixed_values))
-
     results = {
         'davis_name': davis_name,
         'all_trials_data': all_trials_data,
-        'avg_recall': overall_mean,
-        'std_recall': overall_std,
-        'median_recall': overall_median,
-        'avg_precision': precision_mean,
-        'avg_fpr': fpr_mean,
-        'avg_jaccard': jaccard_mean,
-        'avg_accuracy': accuracy_mean,
-        'avg_matter_weighted_recall': matter_weighted_recall_mean,
-        'avg_matter_weighted_precision': matter_weighted_precision_mean,
-        'avg_matter_weighted_f1': matter_weighted_f1_mean,
-        'avg_matter_weighted_jaccard': matter_weighted_jaccard_mean,
-        'avg_matter_weighted_accuracy': matter_weighted_accuracy_mean,
         'avg_matter_weighted_recall_fixed': matter_weighted_recall_fixed_mean,
         'avg_matter_weighted_precision_fixed': matter_weighted_precision_fixed_mean,
-        'avg_matter_weighted_f1_fixed': matter_weighted_f1_fixed_mean,
         'avg_matter_weighted_jaccard_fixed': matter_weighted_jaccard_fixed_mean,
         'avg_matter_weighted_accuracy_fixed': matter_weighted_accuracy_fixed_mean,
         'avg_auc_roc': auc_roc_mean,
         'fps_mean': fps_mean,
-        'fps_std': fps_std
+        'fps_std': fps_std,
     }
     return results, best_visualization_data
 
@@ -778,11 +557,11 @@ def create_genmatter_results_video(viz_data, annotations_path, img_dims, experim
     num_true_unique_particles_first_frame = viz_data.get('num_true_unique_particles_first_frame', None)
     davis_name = viz_data.get('davis_name', 'Unknown-Stimulus')
 
-    # Per-trial best run (for lines)
-    recall_scores      = viz_data['recall_scores']
-    precision_scores   = viz_data['precision_scores']
-    fpr_scores         = viz_data['fpr_scores']
-    iou_scores         = viz_data['iou_scores']
+    # Per-trial best run: matter-weighted scores (fixed frame-0 blob weights)
+    recall_scores      = viz_data['matter_weighted_recall_fixed_scores']
+    precision_scores   = viz_data['matter_weighted_precision_fixed_scores']
+    iou_scores         = viz_data['matter_weighted_jaccard_fixed_scores']
+    fpr_scores         = None  # not plotted (primary metrics are MW recall / precision / Jaccard)
     # Framewise mean across all runs
     per_frame_recall_mean    = viz_data.get('per_frame_recall_mean', None)
     per_frame_precision_mean = viz_data.get('per_frame_precision_mean', None)
@@ -870,19 +649,17 @@ def create_genmatter_results_video(viz_data, annotations_path, img_dims, experim
     # Per-frame mean as dashed lines (across runs, if multiple)
     lines_mean = {}
     if per_frame_recall_mean is not None:
-        lines_mean['recall'], = ax_metrics.plot(x_frames, per_frame_recall_mean, '--', color='#2ecc71', alpha=0.38, lw=2, label='Recall (mean)')
+        lines_mean['recall'], = ax_metrics.plot(x_frames, per_frame_recall_mean, '--', color='#2ecc71', alpha=0.38, lw=2, label='MW recall (mean)')
     if per_frame_precision_mean is not None:
-        lines_mean['precision'], = ax_metrics.plot(x_frames, per_frame_precision_mean, '--', color='#3498db', alpha=0.38, lw=2, label='Precision (mean)')
-    if per_frame_fpr_mean is not None:
-        lines_mean['fpr'], = ax_metrics.plot(x_frames, per_frame_fpr_mean, '--', color='#e74c3c', alpha=0.38, lw=2, label='FPR (mean)')
+        lines_mean['precision'], = ax_metrics.plot(x_frames, per_frame_precision_mean, '--', color='#3498db', alpha=0.38, lw=2, label='MW precision (mean)')
     if per_frame_iou_mean is not None:
-        lines_mean['iou'], = ax_metrics.plot(x_frames, per_frame_iou_mean, '--', color='#9b59b6', alpha=0.38, lw=2, label='IoU (mean)')
+        lines_mean['iou'], = ax_metrics.plot(x_frames, per_frame_iou_mean, '--', color='#9b59b6', alpha=0.38, lw=2, label='MW Jaccard (mean)')
 
     # Best run (this trial) as colored solid lines
-    recall_line, = ax_metrics.plot([], [], '-', color='#2ecc71', linewidth=2, label='Recall (best run)')
-    precision_line, = ax_metrics.plot([], [], '-', color='#3498db', linewidth=2, label='Precision (best run)')
-    fpr_line, = ax_metrics.plot([], [], '-', color='#e74c3c', linewidth=2, label='FPR (best run)')
-    iou_line, = ax_metrics.plot([], [], '-', color='#9b59b6', linewidth=2, label='IoU (best run)')
+    recall_line, = ax_metrics.plot([], [], '-', color='#2ecc71', linewidth=2, label='MW recall (best run)')
+    precision_line, = ax_metrics.plot([], [], '-', color='#3498db', linewidth=2, label='MW precision (best run)')
+    fpr_line, = ax_metrics.plot([], [], '-', color='#e74c3c', linewidth=2, label='_nolegend_')
+    iou_line, = ax_metrics.plot([], [], '-', color='#9b59b6', linewidth=2, label='MW Jaccard (best run)')
 
     # Move the legend to the right side of the plot
     ax_metrics.legend(
@@ -961,7 +738,7 @@ def create_genmatter_results_video(viz_data, annotations_path, img_dims, experim
         frames_range = np.arange(frame_idx + 1)
         recall_line.set_data(frames_range, recall_scores[:frame_idx+1])
         precision_line.set_data(frames_range, precision_scores[:frame_idx+1])
-        fpr_line.set_data(frames_range, fpr_scores[:frame_idx+1])
+        fpr_line.set_data([], [])
         iou_line.set_data(frames_range, iou_scores[:frame_idx+1])
 
         # Subplot titles

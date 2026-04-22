@@ -1,0 +1,437 @@
+{
+    "fam_1": {
+        "config_num": 1,
+        "point_1": [
+            431,
+            164
+        ],
+        "point_2": [
+            449,
+            275
+        ],
+        "start_frame": 47,
+        "end_frame": 67,
+        "probe_timestep": 57,
+        "ground_truth": false
+    },
+    "fam_2": {
+        "config_num": 3,
+        "point_1": [
+            431,
+            250
+        ],
+        "point_2": [
+            449,
+            275
+        ],
+        "start_frame": 67,
+        "end_frame": 87,
+        "probe_timestep": 77,
+        "ground_truth": true
+    },
+    "s1_c1": {
+        "config_num": 1,
+        "point_1": [
+            500,
+            288
+        ],
+        "point_2": [
+            578,
+            356
+        ],
+        "start_frame": 57,
+        "end_frame": 77,
+        "probe_timestep": 67,
+        "ground_truth": true
+    },
+    "s2_c1": {
+        "config_num": 1,
+        "point_1": [
+            512,
+            299
+        ],
+        "point_2": [
+            487,
+            360
+        ],
+        "start_frame": 44,
+        "end_frame": 64,
+        "probe_timestep": 54,
+        "ground_truth": false
+    },
+    "s3_c1": {
+        "config_num": 1,
+        "point_1": [
+            383,
+            282
+        ],
+        "point_2": [
+            506,
+            282
+        ],
+        "start_frame": 44,
+        "end_frame": 64,
+        "probe_timestep": 54,
+        "ground_truth": true
+    },
+    "s1_c10": {
+        "config_num": 10,
+        "point_1": [
+            540,
+            357
+        ],
+        "point_2": [
+            506,
+            395
+        ],
+        "start_frame": 65,
+        "end_frame": 85,
+        "probe_timestep": 75,
+        "ground_truth": false
+    },
+    "s2_c10": {
+        "config_num": 10,
+        "point_1": [
+            485,
+            238
+        ],
+        "point_2": [
+            455,
+            325
+        ],
+        "start_frame": 46,
+        "end_frame": 66,
+        "probe_timestep": 56,
+        "ground_truth": true
+    },
+    "s3_c10": {
+        "config_num": 10,
+        "point_1": [
+            485,
+            238
+        ],
+        "point_2": [
+            410,
+            438
+        ],
+        "start_frame": 46,
+        "end_frame": 66,
+        "probe_timestep": 56,
+        "ground_truth": false
+    },
+    "s1_c8": {
+        "config_num": 8,
+        "point_1": [
+            460,
+            370
+        ],
+        "point_2": [
+            421,
+            350
+        ],
+        "start_frame": 45,
+        "end_frame": 65,
+        "probe_timestep": 55,
+        "ground_truth": true
+    },
+    "s2_c8": {
+        "config_num": 8,
+        "point_1": [
+            492,
+            355
+        ],
+        "point_2": [
+            475,
+            395
+        ],
+        "start_frame": 45,
+        "end_frame": 65,
+        "probe_timestep": 55,
+        "ground_truth": false
+    },
+    "s3_c8": {
+        "config_num": 8,
+        "point_1": [
+            605,
+            289
+        ],
+        "point_2": [
+            549,
+            353
+        ],
+        "start_frame": 49,
+        "end_frame": 69,
+        "probe_timestep": 59,
+        "ground_truth": true
+    },
+    "s1_c7": {
+        "config_num": 7,
+        "point_1": [
+            403,
+            290
+        ],
+        "point_2": [
+            387,
+            347
+        ],
+        "start_frame": 42,
+        "end_frame": 62,
+        "probe_timestep": 52,
+        "ground_truth": false
+    },
+    "s2_c7": {
+        "config_num": 7,
+        "point_1": [
+            540,
+            237
+        ],
+        "point_2": [
+            483,
+            351
+        ],
+        "start_frame": 48,
+        "end_frame": 68,
+        "probe_timestep": 58,
+        "ground_truth": false
+    },
+    "s3_c7": {
+        "config_num": 7,
+        "point_1": [
+            565,
+            290
+        ],
+        "point_2": [
+            518,
+            394
+        ],
+        "start_frame": 59,
+        "end_frame": 79,
+        "probe_timestep": 69,
+        "ground_truth": false
+    },
+    "s1_c5": {
+        "config_num": 5,
+        "point_1": [
+            415,
+            361
+        ],
+        "point_2": [
+            431,
+            304
+        ],
+        "start_frame": 47,
+        "end_frame": 67,
+        "probe_timestep": 57,
+        "ground_truth": false
+    },
+    "s2_c5": {
+        "config_num": 5,
+        "point_1": [
+            500,
+            376
+        ],
+        "point_2": [
+            551,
+            340
+        ],
+        "start_frame": 63,
+        "end_frame": 83,
+        "probe_timestep": 73,
+        "ground_truth": false
+    },
+    "s3_c5": {
+        "config_num": 5,
+        "point_1": [
+            585,
+            350
+        ],
+        "point_2": [
+            568,
+            375
+        ],
+        "start_frame": 70,
+        "end_frame": 90,
+        "probe_timestep": 80,
+        "ground_truth": true
+    },
+    "s1_c2": {
+        "config_num": 2,
+        "point_1": [
+            485,
+            230
+        ],
+        "point_2": [
+            401,
+            226
+        ],
+        "start_frame": 51,
+        "end_frame": 71,
+        "probe_timestep": 61,
+        "ground_truth": true
+    },
+    "s2_c2": {
+        "config_num": 2,
+        "point_1": [
+            590,
+            345
+        ],
+        "point_2": [
+            573,
+            370
+        ],
+        "start_frame": 70,
+        "end_frame": 90,
+        "probe_timestep": 80,
+        "ground_truth": false
+    },
+    "s3_c2": {
+        "config_num": 2,
+        "point_1": [
+            522,
+            229
+        ],
+        "point_2": [
+            400,
+            285
+        ],
+        "start_frame": 68,
+        "end_frame": 88,
+        "probe_timestep": 78,
+        "ground_truth": false
+    },
+    "s1_c6": {
+        "config_num": 6,
+        "point_1": [
+            565,
+            275
+        ],
+        "point_2": [
+            610,
+            325
+        ],
+        "start_frame": 65,
+        "end_frame": 85,
+        "probe_timestep": 75,
+        "ground_truth": true
+    },
+    "s2_c6": {
+        "config_num": 6,
+        "point_1": [
+            613,
+            321
+        ],
+        "point_2": [
+            720,
+            351
+        ],
+        "start_frame": 69,
+        "end_frame": 89,
+        "probe_timestep": 79,
+        "ground_truth": false
+    },
+    "s3_c6": {
+        "config_num": 6,
+        "point_1": [
+            613,
+            321
+        ],
+        "point_2": [
+            484,
+            491
+        ],
+        "start_frame": 69,
+        "end_frame": 89,
+        "probe_timestep": 79,
+        "ground_truth": false
+    },
+    "s1_c9": {
+        "config_num": 9,
+        "point_1": [
+            550,
+            295
+        ],
+        "point_2": [
+            587,
+            269
+        ],
+        "start_frame": 74,
+        "end_frame": 94,
+        "probe_timestep": 84,
+        "ground_truth": false
+    },
+    "s2_c9": {
+        "config_num": 9,
+        "point_1": [
+            528,
+            314
+        ],
+        "point_2": [
+            493,
+            294
+        ],
+        "start_frame": 73,
+        "end_frame": 93,
+        "probe_timestep": 83,
+        "ground_truth": false
+    },
+    "s3_c9": {
+        "config_num": 9,
+        "point_1": [
+            682,
+            350
+        ],
+        "point_2": [
+            538,
+            284
+        ],
+        "start_frame": 73,
+        "end_frame": 93,
+        "probe_timestep": 83,
+        "ground_truth": false
+    },
+    "s1_c4": {
+        "config_num": 4,
+        "point_1": [
+            530,
+            343
+        ],
+        "point_2": [
+            445,
+            385
+        ],
+        "start_frame": 55,
+        "end_frame": 75,
+        "probe_timestep": 65,
+        "ground_truth": false
+    },
+    "s2_c4": {
+        "config_num": 4,
+        "point_1": [
+            500,
+            310
+        ],
+        "point_2": [
+            560,
+            375
+        ],
+        "start_frame": 55,
+        "end_frame": 75,
+        "probe_timestep": 65,
+        "ground_truth": true
+    },
+    "s3_c4": {
+        "config_num": 4,
+        "point_1": [
+            431,
+            358
+        ],
+        "point_2": [
+            449,
+            340
+        ],
+        "start_frame": 47,
+        "end_frame": 67,
+        "probe_timestep": 57,
+        "ground_truth": false
+    }
+}

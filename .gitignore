@@ -5,10 +5,15 @@ __pycache__/
 
 # custom
 .jax_cache/
+# Video-Depth-Anything: cloned on first 3D-motion preprocessing run (depth-anything/Video-Depth-Anything)
+external/video-depth-anything/
 *.pt
 
 # C extensions
 *.so
+
+# project specific
+nohup.out
 
 # Distribution / packaging
 .Python
@@ -208,6 +213,8 @@ assets/
 *.gif
 *.json
 outputs/
+# json files for RDK psychophysics experiment + reproducibility keys
+!preprocessing/random_dot_kinematograms/canonical/*.json
 
 # Track experiment code and postprocessing, but ignore result data
 !experiments/
