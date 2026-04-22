@@ -750,8 +750,7 @@ def run_experiment_for_scene_texture(scene, texture):
             mean_overall_accuracy, oa_lo, oa_hi = bootstrap_mean_ci_95(run_overall_accuracies)
             print(
                 f"Mean Overall Accuracy (across {len(run_overall_accuracies)} runs): "
-                f"{mean_overall_accuracy:.3f} [{oa_lo:.3f}, {oa_hi:.3f}] "
-                f"(95% bootstrap CI, B={BOOTSTRAP_N_SAMPLES}, seed={BOOTSTRAP_RANDOM_SEED})"
+                f"{mean_overall_accuracy:.3f}"
             )
             print(f"Total frames: {total_frames} (1 initial + {num_tracking_frames} tracked)")
             
@@ -760,8 +759,7 @@ def run_experiment_for_scene_texture(scene, texture):
                 ur_m, ur_lo, ur_hi = bootstrap_mean_ci_95(run_uncertainty_ratios)
                 print(f"\nUncertainty Statistics (averaged across frames and runs):")
                 print(
-                    f"  Mean uncertainty ratio: {ur_m:.3f} [{ur_lo:.3f}, {ur_hi:.3f}] "
-                    f"(95% bootstrap CI)"
+                    f"  Mean uncertainty ratio: {ur_m:.3f}"
                 )
 
             # Per-frame aggregation
@@ -780,7 +778,7 @@ def run_experiment_for_scene_texture(scene, texture):
                         'values': frame_accs
                     })
                     frame_label = f"Frame 0 (initial)" if frame_idx == 0 else f"Frame {frame_idx}"
-                    print(f"  {frame_label}: {mf:.3f} [{flo:.3f}, {fhi:.3f}]")
+                    print(f"  {frame_label}: {mf:.3f}")
                 else:
                     all_frame_accuracies.append(None)
         else:

@@ -513,6 +513,7 @@ def main() -> None:
                 am, alo, ahi = bootstrap_mean_ci_95(vals)
                 acc = {
                     "mean": am,
+                    "std": float(np.std(vals)),
                     "ci95_low": alo,
                     "ci95_high": ahi,
                     "bootstrap_n": BOOTSTRAP_N_SAMPLES,
@@ -521,6 +522,7 @@ def main() -> None:
             else:
                 acc = {
                     "mean": None,
+                    "std": None,
                     "ci95_low": None,
                     "ci95_high": None,
                     "bootstrap_n": BOOTSTRAP_N_SAMPLES,

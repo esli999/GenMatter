@@ -111,6 +111,8 @@ uv run python run_experiments.py davis-tracking-gt-init
 uv run python run_experiments.py davis-ablation-sam
 uv run python run_experiments.py davis-ablation-gt-init
 uv run python run_experiments.py cotracker
+
+# optional -- if you want to run a spped test (FPS) at different subsampling rates
 uv run python run_experiments.py davis-subsampling-sam
 uv run python run_experiments.py davis-subsampling-gt-init
 
