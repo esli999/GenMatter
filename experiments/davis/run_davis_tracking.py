@@ -903,14 +903,14 @@ def process_video(video_name):
             same_indices_all_timesteps=True,
         )
         tracked_features = tracked_features_full[:, subsampled_indices, :]
-        first_frame_seg_init = first_frame_seg[subsampled_indices]
 
-        # Initialize
+        # Initialize (GT): pass full-resolution frame-0 mask like run_davis_subsampling — K-means uses
+        # subsampled_indices internally; SAM path still uses the frame-0 PNG only.
         kmeans_chm, roi_blob_indices, roi_hyperblob_indices, num_hyperblobs = initialize_model_with_dino(
             tracked_points,
             NUM_BLOBS,
             NUM_HYPERBLOBS_ORIGINAL,
-            first_frame_seg_init,
+            first_frame_seg,
             tracked_motion_vectors,
             tracked_features,
             img_dims,
