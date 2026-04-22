@@ -642,10 +642,12 @@ def _best_non_ablated_run(
     sub: dict[float, dict[str, dict[str, Any]]],
 ) -> tuple[str, float | None, float]:
     """Return (label, subsample grid % or None if *full* won, mean Jaccard)."""
+    # In this repo, the tracking "full model" is the 1/128 grid run.
+    full_label = "full model (1/128)"
     candidates: list[tuple[str, float | None, float]] = []
     if dino_full:
         m = _mean_jaccard_over_videos(dino_full)
-        candidates.append(("full", None, m))
+        candidates.append((full_label, None, m))
     for pct in sorted(sub.keys(), reverse=True):
         m = _mean_jaccard_over_videos(sub[pct])
         candidates.append((_fraction_label_for_pct(pct), float(pct), m))
@@ -723,7 +725,7 @@ def print_davis_analysis_report(
         cols: list[tuple[str, Any]] = []
         cols.append(("CoTracker", lambda v: ct_jaccard(v)))
         if include_full:
-            cols.append(("full", lambda v: _jaccard_from_metrics(dino_full.get(v))))
+            cols.append(("full model (1/128)", lambda v: _jaccard_from_metrics(dino_full.get(v))))
         for pct in sorted(sub.keys(), reverse=True):
             lab = _fraction_label_for_pct(pct)
             pv = sub[pct]
@@ -841,9 +843,9 @@ def print_davis_analysis_report(
         js = [ct_jaccard(v) for v in sorted(ct_results.keys())]
         agg_rows.append(("CoTracker", "—", js, [float("nan")] * len(js)))
     if dino_sam:
-        collect_series("full", "SAM", dino_sam)
+        collect_series("full model (1/128)", "SAM", dino_sam)
     if dino_gt_init:
-        collect_series("full", "GT", dino_gt_init)
+        collect_series("full model (1/128)", "GT", dino_gt_init)
     all_pcts = sorted(set(sub_sam.keys()) | set(sub_gt_init.keys()), reverse=True)
     for pct in all_pcts:
         if pct in sub_sam:
@@ -860,7 +862,7 @@ def print_davis_analysis_report(
     ) -> tuple[int, int, str]:
         model, init, _, _ = row
         init_rank = {"—": 0, "SAM": 1, "GT": 2}.get(init, 9)
-        if model == "full":
+        if model == "full model (1/128)":
             return (init_rank, 0, "")
         if model in _FRACS_IN_ORDER:
             return (init_rank, 1, f"{_FRACS_IN_ORDER.index(model):04d}")
@@ -964,14 +966,14 @@ def _print_davis_inputs_loaded(
          f"({len(ct_results)} videos)" if ct_results else "")
     if dino_sam:
         line(
-            "DINO full-grid (SAM)",
+            "DINO tracking (SAM) (1/128)",
             config.DAVIS_TRACKING_OUTPUT_DIR_SAM,
             True,
             f"({len(dino_sam)} videos)",
         )
     if dino_gt_init:
         line(
-            "DINO full-grid (GT init)",
+            "DINO tracking (GT init) (1/128)",
             config.DAVIS_TRACKING_OUTPUT_DIR_GT_INIT,
             True,
             f"({len(dino_gt_init)} videos)",

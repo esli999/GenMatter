@@ -605,10 +605,11 @@ def blob_tracking_gibbs_dino(key, genmatter_state):
     # # added this to see if it helps below
     # key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_assignments_feature_only, (key, genmatter_state))
     # # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_assignments_position_only, (key, genmatter_state))
+    # Keep this schedule identical to run_davis_subsampling so 1/128 results match exactly.
+    key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_position_only, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_means, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
-    key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_assignments_with_outlier, (key, genmatter_state))
+    key, genmatter_state = jax.lax.fori_loop(0, 1, update_blob_assignments_with_outlier, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocities, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 15, update_blob_velocity_covariances, (key, genmatter_state))
     key, genmatter_state = jax.lax.fori_loop(0, 3, update_blob_features_dino, (key, genmatter_state))
@@ -880,9 +881,9 @@ def process_video(video_name):
         tracked_points_full, tracked_motion_vectors_full, num_data_tsteps, img_dims = \
             extract_3d_points_and_motion_vectors_data(DAVIS_3D_MOTION_PATH, video_name)
 
-        # Limit to first 90 frames for jello-trim
+        # Keep this identical to run_davis_subsampling so aggregate numbers match exactly.
         if video_name == "jello_trim":
-            num_data_tsteps = min(num_data_tsteps, 90)
+            num_data_tsteps = min(num_data_tsteps, 50)
             tracked_points_full = tracked_points_full[:num_data_tsteps]
             tracked_motion_vectors_full = tracked_motion_vectors_full[:num_data_tsteps]
             print(f"Limited to first {num_data_tsteps} frames for jello_trim")
@@ -1063,72 +1064,46 @@ def process_video(video_name):
 
         num_datapoints_full = tracked_points_full.shape[1]
 
-        # Extract results — subsampled tracking states live on a subset of pixels; dense-eval each
-        # frame onto the full grid so metrics match run_davis_subsampling at the same retain %.
+        # Extract results (match run_davis_subsampling): always dense-evaluate onto the full grid.
         tracking_data = []
-        if _DATAPOINT_RETAIN_PCT < 100.0:
-            for frame_idx in tqdm(range(len(tracking_wtrs)), desc="Dense evaluating blob assignments"):
-                frame = tracking_wtrs[frame_idx]
-                key, dense_eval_assignments_key = jax.random.split(key)
-                dense_eval_assignments = dense_eval_blob_assignments(
-                    key=dense_eval_assignments_key,
-                    genmatter_state=frame.retval,
-                    dense_positions=tracked_points_full[frame_idx],
-                    dense_vels=tracked_motion_vectors_full[frame_idx],
-                    dense_features=tracked_features_full[frame_idx],
-                    disable_outlier_prob=False,
-                )
-                key, dense_eval_weights_key = jax.random.split(key)
-                dense_eval_weights = dense_eval_blob_weights(
-                    key=dense_eval_weights_key,
-                    genmatter_state=frame.retval,
-                    dense_assignments=dense_eval_assignments,
-                )
-                frame_data = {
-                    'n_blobs': frame.retval.hypers.n_blobs,
-                    'n_hyperblobs': frame.retval.hypers.n_hyperblobs,
-                    'n_datapoints': num_datapoints_full,
-                    'blob_assignments': np.array(dense_eval_assignments),
-                    'datapoint_positions': np.array(tracked_points_full[frame_idx]),
-                    'datapoint_vels': np.array(tracked_motion_vectors_full[frame_idx]),
-                    'datapoint_features': np.array(tracked_features_full[frame_idx]),
-                    'blob_weights': np.array(dense_eval_weights),
-                    'blob_means': np.array(frame.retval.blobs_state.blob_means),
-                    'blob_covs': np.array(frame.retval.blobs_state.blob_covs),
-                    'blob_vel_means': np.array(frame.retval.blobs_state.blob_vel_means),
-                    'blob_vel_covs': np.array(frame.retval.blobs_state.blob_vel_covs),
-                    'blob_features': np.array(frame.retval.blobs_state.blob_features),
-                    'hyperblob_assignments': np.array(frame.retval.blobs_state.hyperblob_assignments),
-                    'hyperblob_weights': np.array(frame.retval.hyperblobs_state.hyperblob_weights),
-                    'hyperblob_means': np.array(frame.retval.hyperblobs_state.hyperblob_means),
-                    'hyperblob_trans_vels': np.array(frame.retval.hyperblobs_state.hyperblob_trans_vels),
-                    'hyperblob_rot_vels': np.array(frame.retval.hyperblobs_state.hyperblob_rot_vels),
-                }
-                tracking_data.append(frame_data)
-        else:
-            for frame_idx in range(len(tracking_wtrs)):
-                frame = tracking_wtrs[frame_idx]
-                frame_data = {
-                    'n_blobs': frame.retval.hypers.n_blobs,
-                    'n_hyperblobs': frame.retval.hypers.n_hyperblobs,
-                    'n_datapoints': frame.retval.hypers.n_datapoints,
-                    'blob_assignments': np.array(frame.retval.datapoints_state.blob_assignments),
-                    'datapoint_positions': np.array(frame.retval.datapoints_state.datapoint_positions),
-                    'datapoint_vels': np.array(frame.retval.datapoints_state.datapoint_vels),
-                    'datapoint_features': np.array(frame.retval.datapoints_state.datapoint_features),
-                    'blob_weights': np.array(frame.retval.blobs_state.blob_weights),
-                    'blob_means': np.array(frame.retval.blobs_state.blob_means),
-                    'blob_covs': np.array(frame.retval.blobs_state.blob_covs),
-                    'blob_vel_means': np.array(frame.retval.blobs_state.blob_vel_means),
-                    'blob_vel_covs': np.array(frame.retval.blobs_state.blob_vel_covs),
-                    'blob_features': np.array(frame.retval.blobs_state.blob_features),
-                    'hyperblob_assignments': np.array(frame.retval.blobs_state.hyperblob_assignments),
-                    'hyperblob_weights': np.array(frame.retval.hyperblobs_state.hyperblob_weights),
-                    'hyperblob_means': np.array(frame.retval.hyperblobs_state.hyperblob_means),
-                    'hyperblob_trans_vels': np.array(frame.retval.hyperblobs_state.hyperblob_trans_vels),
-                    'hyperblob_rot_vels': np.array(frame.retval.hyperblobs_state.hyperblob_rot_vels),
-                }
-                tracking_data.append(frame_data)
+        for frame_idx in tqdm(range(len(tracking_wtrs)), desc="Dense Evaluating Blob Assignments"):
+            frame = tracking_wtrs[frame_idx]
+            key, dense_eval_assignments_key = jax.random.split(key)
+            dense_eval_assignments = dense_eval_blob_assignments(
+                key=dense_eval_assignments_key,
+                genmatter_state=frame.retval,
+                dense_positions=tracked_points_full[frame_idx],
+                dense_vels=tracked_motion_vectors_full[frame_idx],
+                dense_features=tracked_features_full[frame_idx],
+                disable_outlier_prob=False,
+            )
+            key, dense_eval_weights_key = jax.random.split(key)
+            dense_eval_weights = dense_eval_blob_weights(
+                key=dense_eval_weights_key,
+                genmatter_state=frame.retval,
+                dense_assignments=dense_eval_assignments,
+            )
+            frame_data = {
+                'n_blobs': frame.retval.hypers.n_blobs,
+                'n_hyperblobs': frame.retval.hypers.n_hyperblobs,
+                'n_datapoints': num_datapoints_full,
+                'blob_assignments': np.array(dense_eval_assignments),
+                'datapoint_positions': np.array(tracked_points_full[frame_idx]),
+                'datapoint_vels': np.array(tracked_motion_vectors_full[frame_idx]),
+                'datapoint_features': np.array(tracked_features_full[frame_idx]),
+                'blob_weights': np.array(dense_eval_weights),
+                'blob_means': np.array(frame.retval.blobs_state.blob_means),
+                'blob_covs': np.array(frame.retval.blobs_state.blob_covs),
+                'blob_vel_means': np.array(frame.retval.blobs_state.blob_vel_means),
+                'blob_vel_covs': np.array(frame.retval.blobs_state.blob_vel_covs),
+                'blob_features': np.array(frame.retval.blobs_state.blob_features),
+                'hyperblob_assignments': np.array(frame.retval.blobs_state.hyperblob_assignments),
+                'hyperblob_weights': np.array(frame.retval.hyperblobs_state.hyperblob_weights),
+                'hyperblob_means': np.array(frame.retval.hyperblobs_state.hyperblob_means),
+                'hyperblob_trans_vels': np.array(frame.retval.hyperblobs_state.hyperblob_trans_vels),
+                'hyperblob_rot_vels': np.array(frame.retval.hyperblobs_state.hyperblob_rot_vels),
+            }
+            tracking_data.append(frame_data)
 
         # Evaluate
         print("Computing error rates...")
@@ -1150,7 +1125,8 @@ def process_video(video_name):
             fps_list=None,
             render_results_video=False,
             experiment_save_dir=None,
-            force_below_count_thresh_as_outlier=True
+            force_below_count_thresh_as_outlier=True,
+            subsampled_indices=None,
         )
 
         result = {
