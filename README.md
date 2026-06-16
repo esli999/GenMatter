@@ -2,6 +2,8 @@
 
 Probabilistic 3D particle tracking for motion segmentation (Gestalt stimuli + TAP-Vid DAVIS + RDK Psychophysics).
 
+> 🆕 **NEW · [StreamingVision](https://github.com/esli999/StreamingVision)** — an improved version of GenMatter built for real-time applications.
+
 ## Requirements
 
 - CUDA 12.4+ and a compatible NVIDIA driver  
