@@ -212,9 +212,9 @@ def main():
                         # static-init segments (whose fresh inits are near-chance)
                         # and only from motion-trusted sources; moving-init
                         # segments keep their excellent fresh inits.
-                        tgt_static = frame_motion[0] < 0.08
-                        use_carry = (carry is not None and src_trusted
-                                     and tgt_static)
+                        tgt_static = bool(frame_motion[0] < 0.08)
+                        use_carry = bool(carry is not None and src_trusted
+                                         and tgt_static)
                         mem_seg = dataclasses.replace(
                             mem, handoff="always" if use_carry else "none")
                         results, out_arrays, traces, carry = infer_window_mem(
