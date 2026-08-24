@@ -148,15 +148,22 @@ def build_hypers(mcfg: cfg.SfmModelConfig, kmeans_chm, roi_blob_idx, roi_hyper_i
     n_hyper = kmeans_chm["hyperblobs", "hyperblob_means"].shape[0]
 
     mu_H = jnp.median(kmeans_chm["datapoints", "datapoint_positions"], axis=0)
-    Psi_B = jnp.median(kmeans_chm["blobs", "blob_covs"][roi_blob_idx], axis=0)
-    Psi_H = jnp.median(kmeans_chm["hyperblobs", "hyperblob_covs"][roi_hyper_idx], axis=0)
-    Psi_V = jnp.median(kmeans_chm["blobs", "blob_vel_covs"][roi_blob_idx], axis=0)
+    # Degenerate-window guards (both no-ops at every phase-1 operating point):
+    # a static/low-motion init frame can yield (a) empirical Psi medians that are
+    # exactly singular (zero velocity scatter) and (b) <4 points per ROI blob ->
+    # Wishart dof below the dimension. Either makes the joint density -inf for
+    # EVERY state, so selection degenerates for the whole window.
+    eps = 1e-8 * jnp.eye(3)
+    Psi_B = jnp.median(kmeans_chm["blobs", "blob_covs"][roi_blob_idx], axis=0) + eps
+    Psi_H = jnp.median(kmeans_chm["hyperblobs", "hyperblob_covs"][roi_hyper_idx],
+                       axis=0) + eps
+    Psi_V = jnp.median(kmeans_chm["blobs", "blob_vel_covs"][roi_blob_idx], axis=0) + eps
     mean_blobs = jnp.sum(jnp.isin(kmeans_chm["blobs", "hyperblob_assignments"],
                                   roi_hyper_idx)) / len(roi_hyper_idx)
-    nu_H = f_(int(mean_blobs))
+    nu_H = f_(max(int(mean_blobs), 4))
     mean_points = jnp.sum(jnp.isin(kmeans_chm["datapoints", "blob_assignments"],
                                    roi_blob_idx)) / len(roi_blob_idx)
-    nu_B = nu_V = f_(int(mean_points))
+    nu_B = nu_V = f_(max(int(mean_points), 4))
 
     return GenMatter_Hyperparams.create(
         outlier_prob=f_(mcfg.outlier_prob),

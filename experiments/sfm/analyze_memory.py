@@ -69,17 +69,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-root", default=str(cfg.RESULTS_DIR / "windows"))
     ap.add_argument("--variant", default="tiledA_g")
-    ap.add_argument("--baseline", default="sfm_v2")
+    ap.add_argument("--model", default="sfm_v2")
+    ap.add_argument("--baseline", default="null",
+                    help="memory name of the matched baseline ('off' = the plain "
+                         "model run)")
     ap.add_argument("--memories", required=True, help="comma-separated memory names")
     ap.add_argument("--textured-only", action="store_true",
                     help="restrict pairing to non-shaded stimuli")
     args = ap.parse_args()
 
-    base_rows = load(args.out_root, args.baseline, args.variant)
-    print(f"baseline {args.baseline}/{args.variant}: {len(base_rows)} windows")
+    base_name = (args.model if args.baseline == "off"
+                 else f"{args.model}+{args.baseline}")
+    base_rows = load(args.out_root, base_name, args.variant)
+    print(f"baseline {base_name}/{args.variant}: {len(base_rows)} windows")
     report = {}
     for name in args.memories.split(","):
-        mem_rows = load(args.out_root, f"{args.baseline}+{name}", args.variant)
+        mem_rows = load(args.out_root, f"{args.model}+{name}", args.variant)
         b = base_rows
         m = mem_rows
         if args.textured_only:

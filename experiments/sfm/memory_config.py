@@ -50,6 +50,10 @@ def memory_config_grid():
     """Bake-off grid, cheapest-first (plan Workstream 4). Sticky sweep first; the
     filtering sweep composes with the sticky winner (same compiled program)."""
     grid = [MEM_OFF]
+    # matched-baseline control: takes the memory code path (and current hypers
+    # guards) with a negligible kappa, so paired bake-off deltas share everything
+    # but the mechanism under test
+    grid.append(MemoryConfig(name="null", kappa=1e-6, kappa_sel=0.0))
     for k in (0.5, 1.0, 2.0, 4.0):
         grid.append(MemoryConfig(name=f"sticky{k:g}", kappa=k))
     for k in (1.0, 2.0):

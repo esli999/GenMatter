@@ -74,6 +74,9 @@ def main():
     ap.add_argument("--memory", default="off",
                     help="MemoryConfig name from memory_config_grid(); results are "
                          "routed under <config>+<memory> when not 'off'")
+    ap.add_argument("--batch-windows", type=int, default=1,
+                    help=">1 = run B windows through one vmapped program "
+                         "(Workstream 6; ~2x throughput on latency-bound phases)")
     args = ap.parse_args()
 
     all_cfgs = dict(cfg.CONFIGS)
@@ -110,39 +113,10 @@ def main():
     t_start = time.time()
     done = skipped = 0
     times = []
-    for sid, variant in rows:
-        if worklist.is_done(args.out_root, out_name, variant, sid):
-            skipped += 1
-            continue
-        bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, variant)
-        if not bpath.exists():
-            print(f"MISSING bundle {bpath} — skipping", flush=True)
-            continue
-        arrays, meta = bundles.load_bundle(bpath)
-        seed = mcfg.seed if args.seed < 0 else args.seed
-        t0 = time.time()
-        try:
-            if mem.is_off():
-                results, out_arrays, traces = infer_window(arrays, mcfg, seed=seed)
-            else:
-                results, out_arrays, traces, _ = infer_window_mem(
-                    arrays, mcfg, mem, seed=seed)
-        except Exception as e:  # degenerate windows etc.: record + move on
-            rdir = worklist.result_dir(args.out_root, out_name, variant, sid)
-            atomic_write(rdir / "results.json", lambda tmp: Path(tmp).write_text(
-                json.dumps({"stim_id": sid, "variant": variant, "error": str(e),
-                            "config": mcfg.name})))
-            print(f"ERROR {sid}/{variant}: {e}", flush=True)
-            done += 1
-            continue
-        dt = time.time() - t0
-        times.append(dt)
+    seed = mcfg.seed if args.seed < 0 else args.seed
 
-        if args.expect_warm and done == 0 and dt > 600:
-            print(f"ABORT: first window took {dt:.0f}s with --expect-warm "
-                  f"(XLA cache miss?)", flush=True)
-            sys.exit(3)
-
+    def write_window(sid, variant, meta, results, out_arrays, traces, dt):
+        nonlocal done
         results.update({"stim_id": sid, "variant": variant, "bundle_meta": meta,
                         "wall_s": dt})
         rdir = worklist.result_dir(args.out_root, out_name, variant, sid)
@@ -163,6 +137,76 @@ def main():
               f"(median {med:.1f}s)", flush=True)
         atomic_write(rdir / "results.json",
                      lambda tmp: Path(tmp).write_text(json.dumps(results, indent=1)))
+
+    def write_error(sid, variant, e):
+        nonlocal done
+        rdir = worklist.result_dir(args.out_root, out_name, variant, sid)
+        atomic_write(rdir / "results.json", lambda tmp: Path(tmp).write_text(
+            json.dumps({"stim_id": sid, "variant": variant, "error": str(e),
+                        "config": mcfg.name, "memory": mem.name})))
+        print(f"ERROR {sid}/{variant}: {e}", flush=True)
+        done += 1
+
+    if args.batch_windows > 1:
+        from experiments.sfm.batched import infer_windows_batched
+        pending = []
+        for sid, variant in rows:
+            if worklist.is_done(args.out_root, out_name, variant, sid):
+                skipped += 1
+                continue
+            bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, variant)
+            if not bpath.exists():
+                print(f"MISSING bundle {bpath} — skipping", flush=True)
+                continue
+            pending.append((sid, variant, bpath))
+        B = args.batch_windows
+        for c0 in range(0, len(pending), B):
+            chunk = pending[c0:c0 + B]
+            loaded = [bundles.load_bundle(p) for _, _, p in chunk]
+            t0 = time.time()
+            entries = infer_windows_batched([a for a, _ in loaded], mcfg,
+                                            mem, seed=seed)
+            dt = (time.time() - t0) / len(chunk)
+            times.extend([dt] * len(chunk))
+            for (sid, variant, _), (_, meta), entry in zip(chunk, loaded, entries):
+                if entry[0] == "error":
+                    write_error(sid, variant, entry[1])
+                else:
+                    _, results, out_arrays, traces = entry
+                    write_window(sid, variant, meta, results, out_arrays, traces, dt)
+        print(f"task done: {done} inferred, {skipped} skipped, "
+              f"median {np.median(times) if times else float('nan'):.1f}s/window, "
+              f"total {time.time()-t_start:.0f}s", flush=True)
+        return
+
+    for sid, variant in rows:
+        if worklist.is_done(args.out_root, out_name, variant, sid):
+            skipped += 1
+            continue
+        bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, variant)
+        if not bpath.exists():
+            print(f"MISSING bundle {bpath} — skipping", flush=True)
+            continue
+        arrays, meta = bundles.load_bundle(bpath)
+        t0 = time.time()
+        try:
+            if mem.is_off():
+                results, out_arrays, traces = infer_window(arrays, mcfg, seed=seed)
+            else:
+                results, out_arrays, traces, _ = infer_window_mem(
+                    arrays, mcfg, mem, seed=seed)
+        except Exception as e:  # degenerate windows etc.: record + move on
+            write_error(sid, variant, e)
+            continue
+        dt = time.time() - t0
+        times.append(dt)
+
+        if args.expect_warm and done == 0 and dt > 600:
+            print(f"ABORT: first window took {dt:.0f}s with --expect-warm "
+                  f"(XLA cache miss?)", flush=True)
+            sys.exit(3)
+
+        write_window(sid, variant, meta, results, out_arrays, traces, dt)
 
     print(f"task done: {done} inferred, {skipped} skipped, "
           f"median {np.median(times) if times else float('nan'):.1f}s/window, "
