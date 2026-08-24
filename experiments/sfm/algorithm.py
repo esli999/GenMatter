@@ -38,6 +38,19 @@ model_jimportance = jax.jit(GenMatter_model_3d.importance)
 class DegenerateWindowError(RuntimeError):
     """Window whose init structures cannot match the compiled static shapes."""
 
+
+def sfm_flow_roi(flow_sq, floor):
+    """Tight moving-object mask from 2D flow magnitude at frame 0: backgrounds are
+    static (median magnitude = RAFT noise floor), the rotating object's surface
+    slides by ~1-4 px. Flat (N,) bool over the grid, morphologically closed."""
+    import cv2
+    from scipy.ndimage import binary_fill_holes
+    mag = np.linalg.norm(np.asarray(flow_sq[0], np.float32), axis=-1)
+    thr = max(floor, 6.0 * float(np.median(mag)))
+    m = (mag > thr).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    return binary_fill_holes(m.astype(bool)).ravel()
+
 # Dial settings copied verbatim from experiments/gestalt/run_gestalt.py
 GIBBS_DIALS = {
     "blob_weights": True, "hyperblob_weights": False,
@@ -149,8 +162,11 @@ def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
     G = cfg.GRID_HW
 
     # --- init structures (CPU, once per window)
-    first_seg = extract_gestalt_segmentation(depth_sq, flow_sq, points)
-    combined = first_seg & valid[0]
+    if mcfg.roi_heuristic == "sfm_flow":
+        combined = sfm_flow_roi(flow_sq, mcfg.roi_flow_floor)
+    else:
+        first_seg = extract_gestalt_segmentation(depth_sq, flow_sq, points)
+        combined = first_seg & valid[0]
     kmeans_chm, roi_b, roi_h = make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob(
         points, mcfg.n_blobs, mcfg.n_hyperblobs,
         segmentation_mask=combined, motion_vectors=motion,
@@ -231,9 +247,13 @@ def _evaluate(per_frame, gt_masks, first_seg_combined, mcfg, t_infer, seed):
         gt = gt_masks[fidx].ravel()
         acc, _ = C.probe_accuracy(gt, pixel_hb, num_probes=100, rng=rng)
         jac = C.jaccard(pred_mask, gt)
+        # GT-referenced DIAGNOSTIC only (never used for selection): best achievable
+        # single-hyperblob IoU — separates "grouping failed" from "selection failed".
+        oracle = max(C.jaccard(pixel_hb == k, gt) for k in range(mcfg.n_hyperblobs))
         unc = C.uncertainty_ratio(fr["counts"])
         results["frames"].append({
             "frame": fidx, "probe_accuracy": acc, "roi_jaccard": jac,
+            "oracle_jaccard": oracle,
             "roi_hyperblob": roi_id, "uncertainty_mean": float(unc.mean()),
             "gt_area": int(gt.sum()), "pred_area": int(pred_mask.sum()),
             "final_score": float(fr["scores"][-1]),
@@ -248,6 +268,8 @@ def _evaluate(per_frame, gt_masks, first_seg_combined, mcfg, t_infer, seed):
     jacs = [f["roi_jaccard"] for f in results["frames"]]
     results["mean_probe_accuracy"] = float(np.mean(accs))
     results["mean_roi_jaccard"] = float(np.mean(jacs))
+    results["mean_oracle_jaccard"] = float(np.mean(
+        [f["oracle_jaccard"] for f in results["frames"]]))
     arrays_out = {k: np.stack(v) if k != "roi_hyperblob_ids" else np.asarray(v)
                   for k, v in arrays_out.items()}
     return results, arrays_out

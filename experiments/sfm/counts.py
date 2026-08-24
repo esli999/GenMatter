@@ -68,9 +68,18 @@ def jaccard(pred_mask, gt_mask):
     return float(inter) / float(union) if union else 1.0
 
 
-def pick_roi_hyperblob(pixel_hb, reference_mask_flat, n_hyperblobs, fallback=0):
-    """Hyperblob with max overlap against a reference mask (GT-free motion heuristic
-    at frame 0, previous-frame ROI afterwards) — run_gestalt's tracking rule."""
+def pick_roi_hyperblob(pixel_hb, reference_mask_flat, n_hyperblobs, fallback=0,
+                       by_iou=True):
+    """Hyperblob matching a reference mask (GT-free motion heuristic at frame 0,
+    previous-frame ROI afterwards). IoU-based by default: raw overlap (run_gestalt's
+    rule) degenerates to the giant background hyperblob when the object is a small
+    fraction of the frame."""
     ref = np.asarray(reference_mask_flat).ravel()
-    overlaps = [(pixel_hb == k)[ref].sum() if ref.any() else 0 for k in range(n_hyperblobs)]
-    return int(np.argmax(overlaps)) if sum(overlaps) > 0 else int(fallback)
+    if not ref.any():
+        return int(fallback)
+    scores = []
+    for k in range(n_hyperblobs):
+        m = (pixel_hb == k)
+        inter = np.logical_and(m, ref).sum()
+        scores.append(inter / max(np.logical_or(m, ref).sum(), 1) if by_iou else inter)
+    return int(np.argmax(scores)) if max(scores) > 0 else int(fallback)

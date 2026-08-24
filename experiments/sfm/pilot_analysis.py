@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.sfm import sfm_config as cfg
 from genmatter.bootstrap_stats import bootstrap_mean_ci_95
 
-CHANCE_BAND = 0.55          # below this mean probe accuracy everything is suspect
+MIN_JACC = 0.10             # below this mean ROI Jaccard, stop and escalate
 N_GPUS = 4
 
 
@@ -36,7 +36,9 @@ def load_rows(out_root):
             continue
         rows.append({"config": rj.parts[-4], "variant": rj.parts[-3],
                      "stim_id": d["stim_id"], "acc": d["mean_probe_accuracy"],
-                     "jacc": d["mean_roi_jaccard"], "wall": d.get("wall_s", np.nan)})
+                     "jacc": d["mean_roi_jaccard"],
+                     "oracle": d.get("mean_oracle_jaccard", np.nan),
+                     "wall": d.get("wall_s", np.nan)})
     return rows
 
 
@@ -46,45 +48,49 @@ def table(rows):
         g[(r["config"], r["variant"])].append(r)
     out = {}
     for k, rs in g.items():
-        accs = [r["acc"] for r in rs]
-        m, lo, hi = bootstrap_mean_ci_95(accs)
-        out[k] = {"n": len(rs), "acc": float(m), "acc_lo": float(lo), "acc_hi": float(hi),
-                  "jacc": float(np.mean([r["jacc"] for r in rs])),
+        jm, jlo, jhi = bootstrap_mean_ci_95([r["jacc"] for r in rs])
+        out[k] = {"n": len(rs),
+                  "jacc": float(jm), "jacc_lo": float(jlo), "jacc_hi": float(jhi),
+                  "acc": float(np.mean([r["acc"] for r in rs])),
+                  "oracle": float(np.nanmean([r["oracle"] for r in rs])),
                   "wall_med": float(np.nanmedian([r["wall"] for r in rs]))}
     return out
 
 
 def decide(tbl):
+    """Primary metric: ROI Jaccard (probe accuracy is dominated by true-negative
+    background for small SFM objects). Ties broken toward the cheapest config."""
     configs = sorted({c for c, _ in tbl})
     variants = sorted({v for _, v in tbl})
-    # per-config accuracy pooled over variants
-    per_cfg = {c: {"acc": float(np.mean([tbl[(c, v)]["acc"] for v in variants if (c, v) in tbl])),
-                   "lo": float(np.min([tbl[(c, v)]["acc_lo"] for v in variants if (c, v) in tbl])),
-                   "hi": float(np.max([tbl[(c, v)]["acc_hi"] for v in variants if (c, v) in tbl])),
+    per_cfg = {c: {"jacc": float(np.mean([tbl[(c, v)]["jacc"] for v in variants if (c, v) in tbl])),
+                   "lo": float(np.min([tbl[(c, v)]["jacc_lo"] for v in variants if (c, v) in tbl])),
+                   "hi": float(np.max([tbl[(c, v)]["jacc_hi"] for v in variants if (c, v) in tbl])),
+                   "acc": float(np.mean([tbl[(c, v)]["acc"] for v in variants if (c, v) in tbl])),
+                   "oracle": float(np.nanmean([tbl[(c, v)]["oracle"] for v in variants if (c, v) in tbl])),
                    "wall": float(np.nanmedian([tbl[(c, v)]["wall_med"] for v in variants if (c, v) in tbl]))}
                for c in configs}
-    best_acc = max(p["acc"] for p in per_cfg.values())
-    if best_acc < CHANCE_BAND:
-        return None, None, per_cfg, "AMBIGUOUS: best accuracy below chance band"
-    # configs statistically tied with the best (CI overlap on the best's lower bound)
-    best_cfg = max(per_cfg, key=lambda c: per_cfg[c]["acc"])
+    best_jacc = max(p["jacc"] for p in per_cfg.values())
+    if best_jacc < MIN_JACC:
+        return None, None, per_cfg, (
+            f"AMBIGUOUS: best mean ROI Jaccard {best_jacc:.3f} < {MIN_JACC} — "
+            "grouping is not isolating objects under any config")
+    best_cfg = max(per_cfg, key=lambda c: per_cfg[c]["jacc"])
     tied = [c for c in configs
             if per_cfg[c]["hi"] >= per_cfg[best_cfg]["lo"] and
-            per_cfg[c]["acc"] >= per_cfg[best_cfg]["acc"] - 0.03]
+            per_cfg[c]["jacc"] >= per_cfg[best_cfg]["jacc"] - 0.05]
     all_cfgs = dict(cfg.CONFIGS)
     all_cfgs.update(cfg.pilot_config_grid())
     cost = {c: all_cfgs[c].track_sweeps * (all_cfgs[c].rot_angle_max_deg /
                                            all_cfgs[c].rot_angle_step_deg) ** 2
             for c in tied}
-    chosen_cfg = min(tied, key=lambda c: (cost[c], -per_cfg[c]["acc"]))
+    chosen_cfg = min(tied, key=lambda c: (cost[c], -per_cfg[c]["jacc"]))
 
-    # variant choice for the chosen config
-    v_acc = {v: tbl[(chosen_cfg, v)] for v in variants if (chosen_cfg, v) in tbl}
-    best_v = max(v_acc, key=lambda v: v_acc[v]["acc"])
-    tiled = [v for v in ("tiledA", "tiledB") if v in v_acc]
+    v_tbl = {v: tbl[(chosen_cfg, v)] for v in variants if (chosen_cfg, v) in tbl}
+    best_v = max(v_tbl, key=lambda v: v_tbl[v]["jacc"])
+    tiled = [v for v in ("tiledA", "tiledB") if v in v_tbl]
     if len(tiled) == 2:
-        tiled_mean = np.mean([v_acc[v]["acc"] for v in tiled])
-        if tiled_mean >= v_acc[best_v]["acc_lo"]:
+        tiled_mean = np.mean([v_tbl[v]["jacc"] for v in tiled])
+        if tiled_mean >= v_tbl[best_v]["jacc_lo"]:
             return chosen_cfg, tiled, per_cfg, "tiled pair within CI of best single variant"
     return chosen_cfg, [best_v], per_cfg, f"single best variant {best_v}"
 
@@ -98,11 +104,12 @@ def main():
     tbl = table(rows)
     chosen_cfg, chosen_variants, per_cfg, note = decide(tbl)
 
-    print(f"{'config':14s} {'variant':9s} {'n':>3s} {'acc':>6s} {'CI':>15s} "
-          f"{'jacc':>6s} {'t_w(s)':>7s}")
+    print(f"{'config':16s} {'variant':9s} {'n':>3s} {'jacc':>6s} {'CI':>15s} "
+          f"{'oracle':>7s} {'acc':>6s} {'t_w(s)':>7s}")
     for (c, v), s in sorted(tbl.items()):
-        print(f"{c:14s} {v:9s} {s['n']:3d} {s['acc']:6.3f} "
-              f"[{s['acc_lo']:.3f},{s['acc_hi']:.3f}] {s['jacc']:6.3f} {s['wall_med']:7.1f}")
+        print(f"{c:16s} {v:9s} {s['n']:3d} {s['jacc']:6.3f} "
+              f"[{s['jacc_lo']:.3f},{s['jacc_hi']:.3f}] {s['oracle']:7.3f} "
+              f"{s['acc']:6.3f} {s['wall_med']:7.1f}")
 
     decision = {"chosen_config": chosen_cfg, "chosen_variants": chosen_variants,
                 "note": note, "per_config": per_cfg,

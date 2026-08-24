@@ -147,6 +147,12 @@ class SfmModelConfig:
     seed: int = 42
     rescore_stride: int = 1               # 1 = score every sweep (dominates strided picks)
     keep_last_samples: int = 50           # assignment history retained for count maps
+    # ROI heuristic feeding k-means init + eval reference:
+    #   "gestalt"  = extract_gestalt_segmentation (paper path; over-segments small
+    #                SFM objects ~20:1 -> ROI hyperblob never isolates them)
+    #   "sfm_flow" = tight 2D-flow-magnitude mask (mag > max(floor, 6x median))
+    roi_heuristic: str = "gestalt"
+    roi_flow_floor: float = 0.35
 
     def content_hash(self) -> str:
         return hashlib.sha1(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()[:10]
@@ -176,7 +182,9 @@ CONFIGS = {c.name: c for c in (PAPER_CONFIG, SFM_BASE)}
 
 
 def pilot_config_grid():
-    """Config variants the pilot compares (each distinct grid pays one compile, cached)."""
+    """Config variants the pilot compares. v1 = gestalt ROI heuristic (baseline);
+    v2 = tight flow ROI + small-object-scaled ROI blob count. All shapes are shared
+    with SFM_BASE except sfm_hb5* -> compiled programs are reused from the cache."""
     import dataclasses
     grid = [SFM_BASE]
     grid.append(dataclasses.replace(SFM_BASE, name="sfm_hb5", n_hyperblobs=5))
@@ -184,6 +192,11 @@ def pilot_config_grid():
     grid.append(dataclasses.replace(SFM_BASE, name="sfm_track500", track_sweeps=500))
     grid.append(dataclasses.replace(SFM_BASE, name="sfm_papergrid",
                                     rot_angle_max_deg=15.0, rot_angle_step_deg=1.0))
+    v2 = dataclasses.replace(SFM_BASE, name="sfm_v2",
+                             roi_heuristic="sfm_flow", n_roi_blobs=40)
+    grid.append(v2)
+    grid.append(dataclasses.replace(v2, name="sfm_v2_hb5", n_hyperblobs=5))
+    grid.append(dataclasses.replace(v2, name="sfm_v2_track300", track_sweeps=300))
     return {c.name: c for c in grid}
 
 
