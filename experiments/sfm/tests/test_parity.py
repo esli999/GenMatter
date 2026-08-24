@@ -77,8 +77,8 @@ def main():
                                 num_gibbs_inner_loops=TINY.inner_loops)
     ref_final = wtrs[-1].retval
     prog = get_phase_program(TINY.init_sweeps, keep_last=4, rescore_stride=1)
-    last, best, best_score, ba, ha, scores = prog(key, state, GIBBS_DIALS,
-                                                  TINY.inner_loops, True)
+    last, best, best_score, ba, ha, scores, _ = prog(key, state, GIBBS_DIALS,
+                                                     TINY.inner_loops, True)
     assert leaves_equal(last.datapoints_state, ref_final.datapoints_state), \
         "datapoints_state diverged"
     assert leaves_equal(last.blobs_state, ref_final.blobs_state), "blobs_state diverged"
@@ -92,6 +92,36 @@ def main():
         assert np.array_equal(np.asarray(ba[-k]), ref_ba), f"ba history mismatch at -{k}"
     assert np.isfinite(float(best_score)), "best_score not finite"
     print("gibbs chain parity: PASS")
+
+    # --- 1b. Trace emission: identical chain (same key), latent-complete traces,
+    # thinned rows exactly matching the per-sweep assignment/score histories.
+    thin = 2
+    prog_t = get_phase_program(TINY.init_sweeps, keep_last=4, rescore_stride=1,
+                               emit_traces=True, trace_thin=thin)
+    last_t, _, _, ba_t, _, scores_t, tr = prog_t(key, state, GIBBS_DIALS,
+                                                 TINY.inner_loops, True)
+    assert leaves_equal(last_t, last), "emit_traces changed the chain"
+    expected = {"hyperblob_weights", "hyperblob_means", "hyperblob_covs",
+                "hyperblob_trans_vels", "hyperblob_rot_vels",
+                "blob_hyperblob_assignments", "blob_weights", "blob_means",
+                "blob_covs", "blob_vel_means", "blob_vel_covs",
+                "datapoint_assignments", "scores"}
+    assert set(tr) == expected, f"trace keys mismatch: {set(tr) ^ expected}"
+    n_kept = int(np.ceil(TINY.init_sweeps / thin))
+    for k, v in tr.items():
+        rows = TINY.init_sweeps if k == "scores" else n_kept
+        assert v.shape[0] == rows, f"{k}: {v.shape} (want {rows} rows)"
+    assert tr["datapoint_assignments"].dtype == np.int16
+    assert tr["blob_means"].dtype == np.float16
+    # thinned trace row i is sweep i*thin; ba holds the LAST 4 sweeps
+    da = np.asarray(tr["datapoint_assignments"], np.int32)
+    for s in range(0, TINY.init_sweeps, thin):
+        back = TINY.init_sweeps - 1 - s      # position of sweep s from the end
+        if back < 4:
+            assert np.array_equal(da[s // thin], np.asarray(ba_t[-(back + 1)])), \
+                f"datapoint trace row for sweep {s} != ba history"
+    assert np.allclose(np.asarray(scores_t), np.asarray(tr["scores"])), "scores trace"
+    print("trace emission: PASS")
 
     # --- 2. Propagation parity (vs run_gestalt's numpy loops)
     st = last

@@ -153,9 +153,17 @@ class SfmModelConfig:
     #   "sfm_flow" = tight 2D-flow-magnitude mask (mag > max(floor, 6x median))
     roi_heuristic: str = "gestalt"
     roi_flow_floor: float = 0.35
+    # Inference-trace logging: save thinned per-sweep values of ALL latent variables
+    # (hyperblob weights/means/covs/transforms, blob weights/means/covs/velocities,
+    # blob->hyperblob and datapoint->blob assignments, joint scores) to traces.npz.
+    log_traces: bool = False
+    trace_thin: int = 5
 
     def content_hash(self) -> str:
-        return hashlib.sha1(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()[:10]
+        d = asdict(self)
+        for k in ("log_traces", "trace_thin"):  # logging-only: the chain is unchanged
+            d.pop(k, None)
+        return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:10]
 
 
 # The published gestalt configuration (run_gestalt.py), used for parity testing.

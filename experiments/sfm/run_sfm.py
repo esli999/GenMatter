@@ -67,19 +67,34 @@ def main():
     ap.add_argument("--expect-warm", action="store_true",
                     help="abort if the first window pays a long compile (cache miss)")
     ap.add_argument("--only-missing", action="store_true")
+    ap.add_argument("--log-traces", action="store_true",
+                    help="write thinned all-latent traces.npz per window "
+                         "(logging-only: config name and content hash are unchanged)")
+    ap.add_argument("--trace-thin", type=int, default=0, help="0 = config default")
     args = ap.parse_args()
 
     all_cfgs = dict(cfg.CONFIGS)
     all_cfgs.update(cfg.pilot_config_grid())
     mcfg = all_cfgs[args.config]
+    if args.log_traces:
+        import dataclasses as _dc
+        mcfg = _dc.replace(mcfg, log_traces=True,
+                           trace_thin=args.trace_thin or mcfg.trace_thin)
 
     rows = worklist.claim(worklist.read_manifest(args.manifest),
                           args.task_id, args.num_tasks)
     if args.limit:
         rows = rows[:args.limit]
 
+    import dataclasses
+    import subprocess
+    git_rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
+                             capture_output=True, text=True).stdout.strip()
     print(f"task {args.task_id}/{args.num_tasks}: {len(rows)} rows, config={mcfg.name} "
-          f"(hash {mcfg.content_hash()}), devices={jax.devices()}", flush=True)
+          f"(hash {mcfg.content_hash()}), git={git_rev}, manifest={args.manifest}, "
+          f"out_root={args.out_root}, seed_arg={args.seed}, "
+          f"devices={jax.devices()}", flush=True)
+    print("CONFIG " + json.dumps(dataclasses.asdict(mcfg), sort_keys=True), flush=True)
 
     t_start = time.time()
     done = skipped = 0
@@ -96,7 +111,7 @@ def main():
         seed = mcfg.seed if args.seed < 0 else args.seed
         t0 = time.time()
         try:
-            results, out_arrays = infer_window(arrays, mcfg, seed=seed)
+            results, out_arrays, traces = infer_window(arrays, mcfg, seed=seed)
         except Exception as e:  # degenerate windows etc.: record + move on
             rdir = worklist.result_dir(args.out_root, mcfg.name, variant, sid)
             atomic_write(rdir / "results.json", lambda tmp: Path(tmp).write_text(
@@ -118,15 +133,21 @@ def main():
         rdir = worklist.result_dir(args.out_root, mcfg.name, variant, sid)
         atomic_write(rdir / "assignments.npz",
                      lambda tmp: np.savez_compressed(tmp, **out_arrays))
+        if traces:  # flat "phase.latent" keys, e.g. "f2_track.blob_means"
+            flat = {f"{ph}.{k}": v for ph, d in traces.items() for k, v in d.items()}
+            atomic_write(rdir / "traces.npz",
+                         lambda tmp: np.savez_compressed(tmp, **flat))
+        done += 1
+        med = np.median(times)
+        print(f"[{done}/{len(rows)}] stim={sid} obj={meta.get('object_id')} "
+              f"tex={meta.get('texture_id')} vp={meta.get('viewpoint_id')} "
+              f"size={meta.get('size_deg')} variant={variant} seed={seed} "
+              f"roi_fb={results['roi_fallback']} gate={meta.get('evidence_gate', False)} "
+              f"jacc={results['mean_roi_jaccard']:.3f} "
+              f"acc={results['mean_probe_accuracy']:.3f} {dt:.1f}s "
+              f"(median {med:.1f}s)", flush=True)
         atomic_write(rdir / "results.json",
                      lambda tmp: Path(tmp).write_text(json.dumps(results, indent=1)))
-        done += 1
-        if done % 5 == 0 or done == 1:
-            med = np.median(times)
-            print(f"[{done}/{len(rows)}] {sid}/{variant}: "
-                  f"acc={results['mean_probe_accuracy']:.3f} "
-                  f"jacc={results['mean_roi_jaccard']:.3f} {dt:.1f}s "
-                  f"(median {med:.1f}s)", flush=True)
 
     print(f"task done: {done} inferred, {skipped} skipped, "
           f"median {np.median(times) if times else float('nan'):.1f}s/window, "

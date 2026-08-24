@@ -72,14 +72,17 @@ VELOCITY_UPDATE_DIALS = {
 _PROGRAM_CACHE = {}
 
 
-def get_phase_program(num_sweeps: int, keep_last: int, rescore_stride: int):
+def get_phase_program(num_sweeps: int, keep_last: int, rescore_stride: int,
+                      emit_traces: bool = False, trace_thin: int = 5):
     """Jitted: (key, state, dials, inner, weighted) ->
-    (last_state, best_state, best_score, ba_hist, ha_hist, scores).
+    (last_state, best_state, best_score, ba_hist, ha_hist, scores, traces).
 
     Candidate set for the argmax matches run_gestalt's strided pick over the trace
-    wrapper: {initial state} ∪ {post-sweep states at multiples of the stride}."""
+    wrapper: {initial state} ∪ {post-sweep states at multiples of the stride}.
+    With emit_traces, `traces` is a dict of thinned per-sweep values of every latent
+    variable (compact dtypes); otherwise it is an empty dict."""
     keep = min(keep_last, num_sweeps)
-    key_ = (num_sweeps, keep, rescore_stride)
+    key_ = (num_sweeps, keep, rescore_stride, emit_traces, trace_thin)
     if key_ in _PROGRAM_CACHE:
         return _PROGRAM_CACHE[key_]
 
@@ -98,15 +101,36 @@ def get_phase_program(num_sweeps: int, keep_last: int, rescore_stride: int):
             best_state = jax.tree_util.tree_map(
                 lambda n, o: jnp.where(better, n, o), st, best_state)
             best_score = jnp.where(better, cand, best_score)
+            tr = {}
+            if emit_traces:
+                hb, bl = st.hyperblobs_state, st.blobs_state
+                tr = {
+                    "hyperblob_weights": hb.hyperblob_weights,
+                    "hyperblob_means": hb.hyperblob_means,
+                    "hyperblob_covs": hb.hyperblob_covs,
+                    "hyperblob_trans_vels": hb.hyperblob_trans_vels,
+                    "hyperblob_rot_vels": hb.hyperblob_rot_vels,
+                    "blob_hyperblob_assignments": bl.hyperblob_assignments.astype(jnp.int8),
+                    "blob_weights": bl.blob_weights.astype(jnp.float16),
+                    "blob_means": bl.blob_means.astype(jnp.float16),
+                    "blob_covs": bl.blob_covs.astype(jnp.float16),
+                    "blob_vel_means": bl.blob_vel_means.astype(jnp.float16),
+                    "blob_vel_covs": bl.blob_vel_covs.astype(jnp.float16),
+                    "datapoint_assignments": st.datapoints_state.blob_assignments
+                        .astype(jnp.int16),
+                }
             ys = (st.datapoints_state.blob_assignments.astype(jnp.int32),
                   st.blobs_state.hyperblob_assignments.astype(jnp.int32),
-                  score)
+                  score, tr)
             return (core, best_score, best_state), ys
 
         core0 = (key, state, dials, inner, weighted)
-        (core, best_score, best_state), (ba, ha, scores) = jax.lax.scan(
+        (core, best_score, best_state), (ba, ha, scores, traces) = jax.lax.scan(
             body, (core0, init_score, state), jnp.arange(num_sweeps))
-        return core[1], best_state, best_score, ba[-keep:], ha[-keep:], scores
+        if emit_traces:
+            traces = {k: v[::trace_thin] for k, v in traces.items()}
+            traces["scores"] = scores
+        return core[1], best_state, best_score, ba[-keep:], ha[-keep:], scores, traces
 
     _PROGRAM_CACHE[key_] = run
     return run
@@ -150,7 +174,14 @@ def build_hypers(mcfg: cfg.SfmModelConfig, kmeans_chm, roi_blob_idx, roi_hyper_i
 
 
 def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
-    """Run the full window schedule (init + 4 tracked frames) on one bundle."""
+    """Run the full window schedule (init frame + T-1 tracked frames) on one bundle.
+
+    Returns (results, arrays_out, traces): `traces` is {} unless mcfg.log_traces, else
+    {phase_name: {latent: np.ndarray}} with phase names f0_init, f{k}_vel, f{k}_track —
+    every latent in the probabilistic program (hyperblob weights/means/covs/vels, blob
+    assignments/weights/means/covs/velocities, datapoint assignments, joint scores),
+    thinned by mcfg.trace_thin and dtype-compacted inside the jitted scan. Observed
+    inputs (datapoint positions/velocities, i.e. pixel depth/flow) are never traced."""
     t_start = time.time()
     seed = mcfg.seed if seed is None else seed
     points = np.asarray(arrays["points_3d"], np.float32)     # (5, N, 3)
@@ -197,36 +228,49 @@ def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
     init_tr, _ = model_jimportance(k_imp, kmeans_chm, (hypers,))
     state = init_tr.get_retval()
 
-    p_init = get_phase_program(mcfg.init_sweeps, mcfg.keep_last_samples, mcfg.rescore_stride)
+    emit = bool(mcfg.log_traces)
+    p_init = get_phase_program(mcfg.init_sweeps, mcfg.keep_last_samples, mcfg.rescore_stride,
+                               emit, mcfg.trace_thin)
     p_vel = get_phase_program(mcfg.vel_sweeps, min(mcfg.keep_last_samples, mcfg.vel_sweeps),
-                              max(1, mcfg.vel_sweeps // 10) if mcfg.rescore_stride > 1 else 1)
+                              max(1, mcfg.vel_sweeps // 10) if mcfg.rescore_stride > 1 else 1,
+                              emit, mcfg.trace_thin)
     p_track = get_phase_program(mcfg.track_sweeps, mcfg.keep_last_samples,
-                                max(1, mcfg.track_sweeps // 20) if mcfg.rescore_stride > 1 else 1)
+                                max(1, mcfg.track_sweeps // 20) if mcfg.rescore_stride > 1 else 1,
+                                emit, mcfg.trace_thin)
 
+    # Latent traces stay ON DEVICE until inference finishes (thinning + dtype
+    # compaction already happened inside the jitted scan), then move to host in a
+    # single transfer — no per-phase sync is added to the chain.
+    dev_traces = {}
     per_frame = []      # (pixel_hb, counts, best_score)
     key, k0 = jax.random.split(key)
-    last, best, bscore, ba, ha, scores = p_init(k0, state, GIBBS_DIALS,
-                                                mcfg.inner_loops, True)
+    last, best, bscore, ba, ha, scores, tr = p_init(k0, state, GIBBS_DIALS,
+                                                    mcfg.inner_loops, True)
     # run_gestalt continues from the LAST init sample
     state = last
+    dev_traces["f0_init"] = tr
     per_frame.append(_frame_summary(state, ba, ha, scores, mcfg, G))
 
     for f in range(1, points.shape[0]):
         state = propagate_state(state, points[f], motion[f])
         key, k1, k2 = jax.random.split(key, 3)
-        _, best, _, _, _, _ = p_vel(k1, state, VELOCITY_UPDATE_DIALS, mcfg.inner_loops, True)
+        _, best, _, _, _, _, tr_v = p_vel(k1, state, VELOCITY_UPDATE_DIALS,
+                                          mcfg.inner_loops, True)
         state = best
-        _, best, bscore, ba, ha, scores = p_track(k2, state, GIBBS_DIALS,
-                                                  mcfg.inner_loops, True)
+        _, best, bscore, ba, ha, scores, tr = p_track(k2, state, GIBBS_DIALS,
+                                                      mcfg.inner_loops, True)
         state = best
+        dev_traces[f"f{f}_vel"] = tr_v
+        dev_traces[f"f{f}_track"] = tr
         per_frame.append(_frame_summary(state, ba, ha, scores, mcfg, G))
 
     jax.block_until_ready(state.datapoints_state.blob_assignments)
     t_infer = time.time() - t_start
+    traces = jax.device_get(dev_traces) if emit else {}
 
     results, arrays_out = _evaluate(per_frame, gt_masks, combined, mcfg, t_infer, seed)
     results["roi_fallback"] = roi_fallback
-    return results, arrays_out
+    return results, arrays_out, traces
 
 
 def _frame_summary(state, ba_hist, ha_hist, scores, mcfg, G):
