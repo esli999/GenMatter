@@ -34,6 +34,10 @@ from .scoring import joint_logprob
 
 model_jimportance = jax.jit(GenMatter_model_3d.importance)
 
+
+class DegenerateWindowError(RuntimeError):
+    """Window whose init structures cannot match the compiled static shapes."""
+
 # Dial settings copied verbatim from experiments/gestalt/run_gestalt.py
 GIBBS_DIALS = {
     "blob_weights": True, "hyperblob_weights": False,
@@ -149,7 +153,15 @@ def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
     combined = first_seg & valid[0]
     kmeans_chm, roi_b, roi_h = make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob(
         points, mcfg.n_blobs, mcfg.n_hyperblobs,
-        segmentation_mask=combined, motion_vectors=motion)
+        segmentation_mask=combined, motion_vectors=motion,
+        num_roi_blobs=mcfg.n_roi_blobs)
+    actual_blobs = kmeans_chm["blobs", "hyperblob_assignments"].shape[0]
+    if actual_blobs != mcfg.n_blobs:
+        # A degenerate window (e.g. <n_roi_blobs moving points) would silently key a
+        # fresh multi-minute XLA compile — refuse instead and let the caller record it.
+        raise DegenerateWindowError(
+            f"k-means produced {actual_blobs} blobs != configured {mcfg.n_blobs} "
+            f"(roi points={int(combined.sum())})")
     hypers = build_hypers(mcfg, kmeans_chm, roi_b, roi_h)
 
     key = jkey(seed)

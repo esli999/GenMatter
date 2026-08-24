@@ -120,6 +120,7 @@ def verify_metadata_formula(rows) -> list:
 class SfmModelConfig:
     name: str
     n_blobs: int
+    n_roi_blobs: int      # fixed ROI blob count -> pins actual_num_blobs == n_blobs
     n_hyperblobs: int
     init_sweeps: int
     vel_sweeps: int
@@ -153,7 +154,7 @@ class SfmModelConfig:
 
 # The published gestalt configuration (run_gestalt.py), used for parity testing.
 PAPER_CONFIG = SfmModelConfig(
-    name="paper", n_blobs=100, n_hyperblobs=5,
+    name="paper", n_blobs=100, n_roi_blobs=50, n_hyperblobs=5,
     init_sweeps=50, vel_sweeps=20, track_sweeps=500, inner_loops=5,
     trans_gaussian_scale=0.2, trans_max_radius=0.35,
     trans_num_radii_cells=15, trans_theta_step_deg=15,
@@ -164,7 +165,7 @@ PAPER_CONFIG = SfmModelConfig(
 # SFM-tuned base: 3 hyperblobs (object/background/slack), more blobs for the 128^2 grid,
 # rotation proposal grid narrowed+refined to the ~4 deg/frame orbit statistics.
 SFM_BASE = SfmModelConfig(
-    name="sfm_base", n_blobs=150, n_hyperblobs=3,
+    name="sfm_base", n_blobs=150, n_roi_blobs=75, n_hyperblobs=3,
     init_sweeps=50, vel_sweeps=20, track_sweeps=150, inner_loops=5,
     trans_gaussian_scale=0.2, trans_max_radius=0.35,
     trans_num_radii_cells=15, trans_theta_step_deg=15,

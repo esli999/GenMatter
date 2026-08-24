@@ -18,8 +18,12 @@ from genmatter.bootstrap_stats import bootstrap_mean_ci_95
 
 def collect(out_root: Path):
     rows = []
+    n_errors = 0
     for rj in sorted(out_root.glob("*/*/*/results.json")):
         d = json.loads(rj.read_text())
+        if "error" in d:
+            n_errors += 1
+            continue
         config, variant = rj.parts[-4], rj.parts[-3]
         s, o, t, v = cfg.condition_of(d["stim_id"])
         rows.append({
@@ -32,6 +36,8 @@ def collect(out_root: Path):
             **{f"acc_f{f['frame']}": f["probe_accuracy"] for f in d["frames"]},
             **{f"jacc_f{f['frame']}": f["roi_jaccard"] for f in d["frames"]},
         })
+    if n_errors:
+        print(f"note: {n_errors} error windows excluded")
     return rows
 
 

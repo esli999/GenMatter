@@ -95,7 +95,16 @@ def main():
         arrays, meta = bundles.load_bundle(bpath)
         seed = mcfg.seed if args.seed < 0 else args.seed
         t0 = time.time()
-        results, out_arrays = infer_window(arrays, mcfg, seed=seed)
+        try:
+            results, out_arrays = infer_window(arrays, mcfg, seed=seed)
+        except Exception as e:  # degenerate windows etc.: record + move on
+            rdir = worklist.result_dir(args.out_root, mcfg.name, variant, sid)
+            atomic_write(rdir / "results.json", lambda tmp: Path(tmp).write_text(
+                json.dumps({"stim_id": sid, "variant": variant, "error": str(e),
+                            "config": mcfg.name})))
+            print(f"ERROR {sid}/{variant}: {e}", flush=True)
+            done += 1
+            continue
         dt = time.time() - t0
         times.append(dt)
 

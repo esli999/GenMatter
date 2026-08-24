@@ -31,7 +31,7 @@ from experiments.sfm import sfm_config as cfg
 import dataclasses
 
 TINY = dataclasses.replace(
-    cfg.SFM_BASE, name="tiny", n_blobs=16, n_hyperblobs=3,
+    cfg.SFM_BASE, name="tiny", n_blobs=16, n_roi_blobs=8, n_hyperblobs=3,
     init_sweeps=6, vel_sweeps=4, track_sweeps=6, inner_loops=2,
     rot_angle_max_deg=10.0, rot_angle_step_deg=2.5,
     trans_num_radii_cells=5, trans_theta_step_deg=45)
@@ -62,7 +62,10 @@ def main():
     points, motion, obj = synth_problem()
     chm, roi_b, roi_h = make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob(
         points, TINY.n_blobs, TINY.n_hyperblobs,
-        segmentation_mask=obj, motion_vectors=motion)
+        segmentation_mask=obj, motion_vectors=motion,
+        num_roi_blobs=TINY.n_roi_blobs)
+    n_actual = chm["blobs", "hyperblob_assignments"].shape[0]
+    assert n_actual == TINY.n_blobs, f"blob count not pinned: {n_actual}"
     hypers = build_hypers(TINY, chm, roi_b, roi_h)
     tr, _ = model_jimportance(jkey(1), chm, (hypers,))
     state = tr.get_retval()
