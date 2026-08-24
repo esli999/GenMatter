@@ -18,13 +18,22 @@ WINDOW_VARIANTS = {
 PILOT_VARIANTS = ("tiledA", "tiledB", "centered", "stride2")
 
 
+def base_variant(variant: str) -> str:
+    """A '_g' suffix marks evidence-gated preprocessing of the same frame window."""
+    return variant.removesuffix("_g")
+
+
+def is_gated(variant: str) -> bool:
+    return variant.endswith("_g")
+
+
 def window_frames(variant: str):
-    return WINDOW_VARIANTS[variant]
+    return WINDOW_VARIANTS[base_variant(variant)]
 
 
 def flow_pairs(variant: str):
     """Consecutive frame pairs within the window (5 pairs)."""
-    f = WINDOW_VARIANTS[variant]
+    f = WINDOW_VARIANTS[base_variant(variant)]
     return tuple(zip(f[:-1], f[1:]))
 
 
@@ -37,4 +46,4 @@ def moving_index(video_frame: int) -> int:
 
 def mask_indices(variant: str):
     """Indices into the per-(size,object,viewpoint) 12-frame mask stack for this window."""
-    return tuple(moving_index(f) for f in WINDOW_VARIANTS[variant])
+    return tuple(moving_index(f) for f in WINDOW_VARIANTS[base_variant(variant)])

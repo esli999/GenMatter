@@ -109,10 +109,14 @@ def resize_grid(arr: np.ndarray) -> np.ndarray:
     return out.astype(np.float16)
 
 
+EVIDENCE_LUM_THRESH = 8  # uint8: below this in BOTH frames of a pair = no flow evidence
+
+
 def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
                   save_raw=False):
     frames_bgr = decode_video(stim_id)[list(cfg.MOVING_FRAMES)]      # (12, 1024, 1024, 3)
     frames_rgb = np.ascontiguousarray(frames_bgr[:, :, :, ::-1])
+    frames_gray = np.stack([cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames_bgr])
 
     with torch.inference_mode():
         inv_depth, _ = vda.infer_video_depth(
@@ -144,10 +148,30 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
         depth_win, factor, med = convert_depth(inv_depth[fidx])       # (6, 1024, 1024)
         flow_win = np.stack([flows[p] for p in W.flow_pairs(variant)])  # (5, 1024, 1024, 2)
 
+        # Evidence gate ('_g' variants): a featureless (near-black) region carries no
+        # correspondence evidence — RAFT hallucinates smooth flow there and VDA depth
+        # flickers, so gate both the 2D flow and (below) the 3D motion to zero where
+        # the pair is dark in BOTH frames. Textured stimuli are unaffected.
+        gated = W.is_gated(variant)
+        if gated:
+            ev_full = np.stack([
+                np.maximum(frames_gray[W.moving_index(a)], frames_gray[W.moving_index(b)])
+                > EVIDENCE_LUM_THRESH
+                for a, b in W.flow_pairs(variant)])                   # (5, 1024, 1024)
+            flow_win = flow_win * ev_full[..., None]
+
         points_3d, motion_3d, motion_valid = compute_3d_points_and_motion(
             depth_win, flow_win, downsample_factor=8,
             min_motion_magnitude=model_cfg.min_motion_magnitude,
             focal_length_scale=model_cfg.focal_length_scale)
+
+        if gated:  # zero the residual depth-flicker Z-motion at no-evidence pixels
+            G = cfg.GRID_HW
+            for t in range(motion_3d.shape[0]):
+                evg = cv2.resize(ev_full[t].astype(np.float32), (G, G),
+                                 interpolation=cv2.INTER_AREA) > 0.25
+                motion_3d[t][~evg.ravel()] = 0.0
+                motion_valid[t] &= evg.ravel()
 
         gt = mask_grid12[fidx]                                        # (6, 128, 128)
         row = meta_rows[stim_id]
@@ -162,6 +186,7 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
                 "object_id": row["object_id"], "texture_id": row["texture_id"],
                 "viewpoint_id": row["viewpoint_id"], "size_deg": row["size_deg"],
                 "depth_rescale_factor": factor, "inv_depth_median_raw": med,
+                "evidence_gate": gated,
                 "min_motion_magnitude": model_cfg.min_motion_magnitude,
                 "focal_length_scale": model_cfg.focal_length_scale,
                 "git_rev": GIT_REV,
