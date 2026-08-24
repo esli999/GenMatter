@@ -167,6 +167,18 @@ def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
     else:
         first_seg = extract_gestalt_segmentation(depth_sq, flow_sq, points)
         combined = first_seg & valid[0]
+    # Guarantee a non-degenerate ROI: with too few confident moving points the
+    # k-means init crashes / breaks the pinned blob count. Fall back to the top-K
+    # pixels by 2D flow magnitude ("most-moving points"), recorded as roi_fallback.
+    roi_fallback = False
+    min_roi = mcfg.n_roi_blobs * 2 + 16
+    if int(combined.sum()) < min_roi:
+        mag = np.linalg.norm(flow_sq[0], axis=-1).ravel()
+        k = max(min_roi, 96)
+        fb = np.zeros_like(combined)
+        fb[np.argpartition(mag, -k)[-k:]] = True
+        combined = fb
+        roi_fallback = True
     kmeans_chm, roi_b, roi_h = make_hierarchical_kmeans_chm_with_mask_fixed_hyperblob(
         points, mcfg.n_blobs, mcfg.n_hyperblobs,
         segmentation_mask=combined, motion_vectors=motion,
@@ -212,7 +224,9 @@ def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
     jax.block_until_ready(state.datapoints_state.blob_assignments)
     t_infer = time.time() - t_start
 
-    return _evaluate(per_frame, gt_masks, combined, mcfg, t_infer, seed)
+    results, arrays_out = _evaluate(per_frame, gt_masks, combined, mcfg, t_infer, seed)
+    results["roi_fallback"] = roi_fallback
+    return results, arrays_out
 
 
 def _frame_summary(state, ba_hist, ha_hist, scores, mcfg, G):
