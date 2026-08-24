@@ -57,6 +57,28 @@ def motion_ratio(gray: np.ndarray, masks: np.ndarray, offset: int = 0):
     return float(np.median(ratios)) if ratios else 0.0
 
 
+def _lead_lag(gray, masks, back=True):
+    """Median over pairs of E(only-current-union) / E(only-shifted-union); the shift
+    is -2 (back) or +2 (fwd). None when the exclusive regions are too small to test
+    (mask never moves -> temporal offset unidentifiable from motion)."""
+    leads, lags = [], []
+    T = gray.shape[0]
+    for t in range(T - 1):
+        ts = t - 2 if back else t + 2
+        if not (0 <= ts and ts + 1 < T):
+            continue
+        diff = cv2.absdiff(gray[t + 1], gray[t]).astype(np.float32)
+        u0 = np.logical_or(masks[t], masks[t + 1])
+        us = np.logical_or(masks[ts], masks[ts + 1])
+        lead, lag = u0 & ~us, us & ~u0
+        if lead.sum() > 30 and lag.sum() > 30:
+            leads.append(float(diff[lead].mean()))
+            lags.append(float(diff[lag].mean()))
+    if not leads:
+        return None
+    return float(np.median(leads) / max(np.median(lags), 1e-3))
+
+
 def verify_one(stim_id: int, tau: int, image_index, cal) -> dict:
     s, o, t, v = cfg.condition_of(stim_id)
     gray = decode_moving_gray(stim_id)                      # (12, 1024, 1024)
@@ -77,24 +99,19 @@ def verify_one(stim_id: int, tau: int, image_index, cal) -> dict:
         rec["checks"]["best_offset"] = int(best_off)
         rec["pass"] = (min(per_frame) >= SHADED_IOU_MIN) and (best_off == 0)
     else:       # texture: motion energy must sit inside the shaded-derived masks
-        ratios = {off: motion_ratio(gray, masks, off) for off in OFFSETS}
-        best_off = max(ratios, key=ratios.get)
-        rec["checks"]["motion_ratio"] = ratios[0]
-        rec["checks"]["best_offset"] = int(best_off)
-        rec["checks"]["offset0_vs_best"] = float(ratios[0] / max(ratios[best_off], 1e-9))
-        # Temporal offset is only identifiable when the mask actually moves across
-        # frames. In-place-rotating small objects have lag-2 mask IoU near 1, inside
-        # energy is then offset-invariant, and the argmax is decided by the
-        # compression-noise floor in the denominator (measured: inside ~26 grey-levels
-        # at every offset, outside 0.01-0.24). Apply the offset test only when
-        # identifiable; spatial correspondence (ratio at offset 0) always applies,
-        # and shaded videos carry exact per-frame temporal checks.
-        lag2 = float(np.median([iou(masks[i], masks[i + 2]) for i in range(10)]))
-        identifiable = lag2 < 0.85
-        rec["checks"]["mask_lag2_iou"] = lag2
-        rec["checks"]["offset_identifiable"] = identifiable
-        ok_offset = (ratios[0] >= 0.85 * ratios[best_off]) if identifiable else True
-        rec["pass"] = (ratios[0] >= MOTION_RATIO_MIN) and ok_offset
+        rec["checks"]["motion_ratio"] = motion_ratio(gray, masks, 0)
+        # Temporal alignment via region-exclusive energy: E_lead = motion energy in
+        # pixels covered ONLY by the offset-0 mask union (where the object newly is),
+        # E_lag_back/fwd = energy in pixels covered ONLY by the ±2-shifted unions
+        # (where it was / will be). A truly shifted video puts its energy in the
+        # shifted-only region (measured ratios << 1); correctly aligned videos give
+        # 3-37x in favor of E_lead. This is tightness- and noise-floor-invariant,
+        # unlike an argmax over the saturated inside/outside ratio.
+        rec["checks"]["lead_lag_back"] = _lead_lag(gray, masks, back=True)
+        rec["checks"]["lead_lag_fwd"] = _lead_lag(gray, masks, back=False)
+        ok_back = rec["checks"]["lead_lag_back"] is None or rec["checks"]["lead_lag_back"] >= 1.5
+        ok_fwd = rec["checks"]["lead_lag_fwd"] is None or rec["checks"]["lead_lag_fwd"] >= 1.5
+        rec["pass"] = (rec["checks"]["motion_ratio"] >= MOTION_RATIO_MIN) and ok_back and ok_fwd
 
     # anchor IoU where an alpha exists (initial frame = moving frame 0)
     key = (o, v, cfg.SIZES_DEG[s])
