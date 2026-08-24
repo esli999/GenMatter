@@ -62,4 +62,11 @@ def memory_config_grid():
                                      kappa=k, filter_lambda=lam))
     for lam in (0.3, 0.5, 0.7):
         grid.append(MemoryConfig(name=f"filt{lam:g}", filter_lambda=lam))
+    # cross-segment handoff (whole-video memory), composed with the in-window
+    # mechanisms; "_hoA" = always adopt the carried state, "_hoG" = guarded
+    for base_name, k, lam in (("ho", 0.0, 0.0), ("sticky1_ho", 1.0, 0.0),
+                              ("sticky1_filt0.5_ho", 1.0, 0.5)):
+        for mode, suf in (("guarded", "G"), ("always", "A")):
+            grid.append(MemoryConfig(name=f"{base_name}{suf}", kappa=k,
+                                     filter_lambda=lam, handoff=mode))
     return {m.name: m for m in grid}
