@@ -119,7 +119,12 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
             frames_rgb, target_fps=-1, input_size=518, device=device, fp32=False)
     inv_depth = np.asarray(inv_depth, np.float32)                    # (12, 1024, 1024)
 
-    flows = compute_flows(raft, frames_rgb, needed_pairs(variants), device, batch_size)
+    # flow pairs are defined in video-frame indices (6..17); frames_rgb holds only
+    # the 12 moving frames, so translate to moving indices (0..11) for array access
+    vid_pairs = needed_pairs(variants)
+    mov_pairs = [(W.moving_index(a), W.moving_index(b)) for a, b in vid_pairs]
+    flows_m = compute_flows(raft, frames_rgb, mov_pairs, device, batch_size)
+    flows = {vp: flows_m[mp] for vp, mp in zip(vid_pairs, mov_pairs)}
 
     if save_raw:
         raw = cfg.assert_writable_path(cfg.DEPTH_CACHE_DIR / f"{stim_id:04d}_raw.npz")
