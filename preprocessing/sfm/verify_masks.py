@@ -82,11 +82,19 @@ def verify_one(stim_id: int, tau: int, image_index, cal) -> dict:
         rec["checks"]["motion_ratio"] = ratios[0]
         rec["checks"]["best_offset"] = int(best_off)
         rec["checks"]["offset0_vs_best"] = float(ratios[0] / max(ratios[best_off], 1e-9))
-        # Small objects rotate in place, so masks barely translate across frames and
-        # offsets near-tie; require offset 0 to be within 15% of the best rather than
-        # a strict argmax (a real misindexing loses by a decisive margin).
-        rec["pass"] = (ratios[0] >= MOTION_RATIO_MIN) and \
-                      (ratios[0] >= 0.85 * ratios[best_off])
+        # Temporal offset is only identifiable when the mask actually moves across
+        # frames. In-place-rotating small objects have lag-2 mask IoU near 1, inside
+        # energy is then offset-invariant, and the argmax is decided by the
+        # compression-noise floor in the denominator (measured: inside ~26 grey-levels
+        # at every offset, outside 0.01-0.24). Apply the offset test only when
+        # identifiable; spatial correspondence (ratio at offset 0) always applies,
+        # and shaded videos carry exact per-frame temporal checks.
+        lag2 = float(np.median([iou(masks[i], masks[i + 2]) for i in range(10)]))
+        identifiable = lag2 < 0.85
+        rec["checks"]["mask_lag2_iou"] = lag2
+        rec["checks"]["offset_identifiable"] = identifiable
+        ok_offset = (ratios[0] >= 0.85 * ratios[best_off]) if identifiable else True
+        rec["pass"] = (ratios[0] >= MOTION_RATIO_MIN) and ok_offset
 
     # anchor IoU where an alpha exists (initial frame = moving frame 0)
     key = (o, v, cfg.SIZES_DEG[s])
