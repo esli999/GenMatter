@@ -114,21 +114,19 @@ EVIDENCE_LUM_THRESH = 8  # uint8: below this in BOTH frames of a pair = no flow 
 
 def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
                   save_raw=False):
-    frames_bgr = decode_video(stim_id)[list(cfg.MOVING_FRAMES)]      # (12, 1024, 1024, 3)
+    frames_bgr = decode_video(stim_id)                               # (24, 1024, 1024, 3)
     frames_rgb = np.ascontiguousarray(frames_bgr[:, :, :, ::-1])
     frames_gray = np.stack([cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames_bgr])
 
     with torch.inference_mode():
         inv_depth, _ = vda.infer_video_depth(
             frames_rgb, target_fps=-1, input_size=518, device=device, fp32=False)
-    inv_depth = np.asarray(inv_depth, np.float32)                    # (12, 1024, 1024)
+    inv_depth = np.asarray(inv_depth, np.float32)                    # (24, 1024, 1024)
 
-    # flow pairs are defined in video-frame indices (6..17); frames_rgb holds only
-    # the 12 moving frames, so translate to moving indices (0..11) for array access
+    # windows/flow pairs are defined in video-frame indices (0..23), which index the
+    # full decoded arrays directly
     vid_pairs = needed_pairs(variants)
-    mov_pairs = [(W.moving_index(a), W.moving_index(b)) for a, b in vid_pairs]
-    flows_m = compute_flows(raft, frames_rgb, mov_pairs, device, batch_size)
-    flows = {vp: flows_m[mp] for vp, mp in zip(vid_pairs, mov_pairs)}
+    flows = compute_flows(raft, frames_rgb, vid_pairs, device, batch_size)
 
     if save_raw:
         raw = cfg.assert_writable_path(cfg.DEPTH_CACHE_DIR / f"{stim_id:04d}_raw.npz")
@@ -144,20 +142,20 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
         out = bundles.bundle_path(cfg.BUNDLES_DIR, stim_id, variant)
         if out.exists():
             continue
-        fidx = [W.moving_index(f) for f in W.window_frames(variant)]  # 6 indices into 0..11
-        depth_win, factor, med = convert_depth(inv_depth[fidx])       # (6, 1024, 1024)
-        flow_win = np.stack([flows[p] for p in W.flow_pairs(variant)])  # (5, 1024, 1024, 2)
+        fidx = list(W.window_frames(variant))                        # video frames 0..23
+        depth_win, factor, med = convert_depth(inv_depth[fidx])      # (F, 1024, 1024)
+        flow_win = np.stack([flows[p] for p in W.flow_pairs(variant)])  # (F-1, 1024, 1024, 2)
 
-        # Evidence gate ('_g' variants): a featureless (near-black) region carries no
-        # correspondence evidence — RAFT hallucinates smooth flow there and VDA depth
-        # flickers, so gate both the 2D flow and (below) the 3D motion to zero where
-        # the pair is dark in BOTH frames. Textured stimuli are unaffected.
-        gated = W.is_gated(variant)
+        # Evidence gate (standard for seg* variants, '_g' suffix for phase-1 windows):
+        # a featureless (near-black) region carries no correspondence evidence — RAFT
+        # hallucinates smooth flow there and VDA depth flickers, so gate both the 2D
+        # flow and (below) the 3D motion to zero where the pair is dark in BOTH
+        # frames. Textured stimuli are unaffected.
+        gated = W.default_gated(variant)
         if gated:
             ev_full = np.stack([
-                np.maximum(frames_gray[W.moving_index(a)], frames_gray[W.moving_index(b)])
-                > EVIDENCE_LUM_THRESH
-                for a, b in W.flow_pairs(variant)])                   # (5, 1024, 1024)
+                np.maximum(frames_gray[a], frames_gray[b]) > EVIDENCE_LUM_THRESH
+                for a, b in W.flow_pairs(variant)])                  # (F-1, 1024, 1024)
             flow_win = flow_win * ev_full[..., None]
 
         points_3d, motion_3d, motion_valid = compute_3d_points_and_motion(
@@ -173,7 +171,7 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
                 motion_3d[t][~evg.ravel()] = 0.0
                 motion_valid[t] &= evg.ravel()
 
-        gt = mask_grid12[fidx]                                        # (6, 128, 128)
+        gt = mask_grid12[[W.frame_to_mask_index(f) for f in fidx]]   # (F, 128, 128)
         row = meta_rows[stim_id]
         bundles.save_bundle(
             out,
@@ -183,6 +181,7 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
             gt_masks=gt,
             meta={
                 "stim_id": stim_id, "variant": variant,
+                "window_frames": fidx,
                 "object_id": row["object_id"], "texture_id": row["texture_id"],
                 "viewpoint_id": row["viewpoint_id"], "size_deg": row["size_deg"],
                 "depth_rescale_factor": factor, "inv_depth_median_raw": med,
@@ -210,7 +209,8 @@ def main():
     ap.add_argument("--save-raw", action="store_true")
     args = ap.parse_args()
 
-    variants = args.variants.split(",")
+    variants = (sorted(W.SEGMENT_VARIANTS) if args.variants == "segments"
+                else args.variants.split(","))
     model_cfg = cfg.CONFIGS.get(args.config) or cfg.pilot_config_grid()[args.config]
 
     if args.stim_file:

@@ -51,13 +51,18 @@ def is_done(out_root, config_name, variant, stim_id) -> bool:
 def main():
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--make", choices=["pilot", "full", "warmup"], required=True)
+    ap.add_argument("--make", choices=["pilot", "full", "warmup", "large27"],
+                    required=True)
     ap.add_argument("--variants", default="tiledA,tiledB,centered,stride2")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
-    variants = (list(W.PILOT_VARIANTS) if args.variants == "all"
-                else args.variants.split(","))
+    if args.variants == "all":
+        variants = list(W.PILOT_VARIANTS)
+    elif args.variants == "segments":
+        variants = sorted(W.SEGMENT_VARIANTS)
+    else:
+        variants = args.variants.split(",")
     # sanity gate: the stim_id arithmetic must match the CSV before any manifest exists
     bad = cfg.verify_metadata_formula(cfg.load_meta_rows())
     if bad:
@@ -67,6 +72,9 @@ def main():
         ids = pilot_stim_ids()
     elif args.make == "warmup":
         ids = pilot_stim_ids()[:1]
+    elif args.make == "large27":
+        # all 840 large-FOV (27 deg = size_idx 2) videos
+        ids = [i for i in range(2 * 840, 3 * 840)]
     else:
         ids = [i for i in range(cfg.N_STIMULI)]
 

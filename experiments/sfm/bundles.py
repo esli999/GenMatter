@@ -8,7 +8,9 @@ import numpy as np
 
 from . import sfm_config as cfg
 
-N_T = 5  # model timesteps per window (5 flow frames)
+# Model timesteps per window T = len(window frames) - 1 (one per flow pair); phase-1
+# 6-frame variants have T=5, the whole-video seg0..seg5 variants have T=3. Validation
+# infers T from points_3d and checks every field against it.
 
 
 def bundle_path(bundles_dir, stim_id: int, variant: str) -> Path:
@@ -49,13 +51,16 @@ def load_bundle(path):
 
 def _validate(a):
     G, N = cfg.GRID_HW, cfg.N_DATAPOINTS
+    T = a["points_3d"].shape[0]
+    if T < 1:
+        raise ValueError(f"bundle has {T} timesteps")
     expect = {
-        "points_3d": (N_T, N, 3),
-        "motion_3d": (N_T, N, 3),
-        "motion_valid": (N_T, N),
-        "depth_sq": (N_T + 1, G, G),
-        "flow_sq": (N_T, G, G, 2),
-        "gt_masks": (N_T + 1, G, G),
+        "points_3d": (T, N, 3),
+        "motion_3d": (T, N, 3),
+        "motion_valid": (T, N),
+        "depth_sq": (T + 1, G, G),
+        "flow_sq": (T, G, G, 2),
+        "gt_masks": (T + 1, G, G),
     }
     for k, shape in expect.items():
         if tuple(a[k].shape) != shape:
