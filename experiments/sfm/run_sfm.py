@@ -179,7 +179,40 @@ def main():
               f"total {time.time()-t_start:.0f}s", flush=True)
         return
 
+    segs = [f"seg{i}" for i in range(6)]
     for sid, variant in rows:
+        # A manifest row (sid, "video") = the six segments run IN ORDER with the
+        # memory carry handed across segment boundaries (mem.handoff decides
+        # whether/how the carried state is adopted). One row per video keeps a
+        # video's segments in one worker by construction.
+        if variant == "video":
+            if all(worklist.is_done(args.out_root, out_name, sv, sid) for sv in segs):
+                skipped += 1
+                continue
+            carry = None
+            for sv in segs:
+                bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
+                if not bpath.exists():
+                    print(f"MISSING bundle {bpath} — skipping video {sid}", flush=True)
+                    carry = None
+                    continue
+                arrays, meta = bundles.load_bundle(bpath)
+                t0 = time.time()
+                try:
+                    if mem.is_off():   # degenerate use: independent segments
+                        results, out_arrays, traces = infer_window(arrays, mcfg,
+                                                                   seed=seed)
+                    else:
+                        results, out_arrays, traces, carry = infer_window_mem(
+                            arrays, mcfg, mem, seed=seed, carry_in=carry)
+                except Exception as e:
+                    write_error(sid, sv, e)
+                    carry = None
+                    continue
+                dt = time.time() - t0
+                times.append(dt)
+                write_window(sid, sv, meta, results, out_arrays, traces, dt)
+            continue
         if worklist.is_done(args.out_root, out_name, variant, sid):
             skipped += 1
             continue
