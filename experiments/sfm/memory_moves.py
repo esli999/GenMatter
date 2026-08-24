@@ -108,11 +108,22 @@ def frame_aux(state, mem, base):
     Psi_B = truncate_eigenval_ratio(
         (1.0 - lam) * base.Psi_B + lam * (base.nu_B[:, None, None] + d + 1) * covs,
         threshold=1e6)
-    Psi_V = truncate_eigenval_ratio(
-        (1.0 - lam) * base.Psi_V + lam * (base.nu_V[:, None, None] + d + 1) * vcovs,
-        threshold=1e6)
     mu_Sigma0 = covs / (lam * occ) + mem.process_noise_q * eye
-    vel_Sigma0 = vcovs / (lam * occ) + mem.vel_process_noise_q * eye
+
+    if mem.filter_velocity:
+        Psi_V = truncate_eigenval_ratio(
+            (1.0 - lam) * base.Psi_V + lam * (base.nu_V[:, None, None] + d + 1) * vcovs,
+            threshold=1e6)
+        vel_Sigma0 = vcovs / (lam * occ) + mem.vel_process_noise_q * eye
+        vel_mu0 = state.blobs_state.blob_vel_means
+    else:
+        # position/shape memory only: velocity priors stay effectively stock
+        # (base NIW scale, near-flat Gaussian toward 0 — velocities re-adapt to
+        # the data within a frame, avoiding stale-motion entrenchment at
+        # cessation)
+        Psi_V = base.Psi_V
+        vel_Sigma0 = 1e6 * eye
+        vel_mu0 = jnp.zeros_like(state.blobs_state.blob_vel_means)
 
     return MemAux(
         prev_assign=anchor,
@@ -121,7 +132,7 @@ def frame_aux(state, mem, base):
         use_filter=jnp.asarray(True),
         nu_B=base.nu_B, Psi_B=Psi_B, nu_V=base.nu_V, Psi_V=Psi_V,
         mu_mu0=state.blobs_state.blob_means, mu_Sigma0=mu_Sigma0,
-        vel_mu0=state.blobs_state.blob_vel_means, vel_Sigma0=vel_Sigma0,
+        vel_mu0=vel_mu0, vel_Sigma0=vel_Sigma0,
     )
 
 

@@ -20,6 +20,10 @@ class MemoryConfig:
     filter_lambda: float = 0.0
     process_noise_q: float = 1e-4       # Sigma0 floor for blob-mean priors
     vel_process_noise_q: float = 1e-5   # Sigma0 floor for velocity-mean priors
+    # False = filter positions/shapes only; velocity moves stay stock. Velocity
+    # memory entrenches stale motion at cessation (frames where motion stops):
+    # the filtered prior says "still moving" while the data says zero.
+    filter_velocity: bool = True
     # forward-backward: 2 = rerun forward with next-frame-informed priors
     smooth_passes: int = 1
     # multi-particle SMC (1 = single chain)
@@ -62,6 +66,8 @@ def memory_config_grid():
                                      kappa=k, filter_lambda=lam))
     for lam in (0.3, 0.5, 0.7, 0.85):
         grid.append(MemoryConfig(name=f"filt{lam:g}", filter_lambda=lam))
+        grid.append(MemoryConfig(name=f"filt{lam:g}p", filter_lambda=lam,
+                                 filter_velocity=False))
     # cross-segment handoff (whole-video memory), composed with the in-window
     # mechanisms; "_hoA" = always adopt the carried state, "_hoG" = guarded
     for base_name, k, lam in (("ho", 0.0, 0.0), ("sticky1_ho", 1.0, 0.0),
