@@ -81,7 +81,12 @@ def verify_one(stim_id: int, tau: int, image_index, cal) -> dict:
         best_off = max(ratios, key=ratios.get)
         rec["checks"]["motion_ratio"] = ratios[0]
         rec["checks"]["best_offset"] = int(best_off)
-        rec["pass"] = (ratios[0] >= MOTION_RATIO_MIN) and (best_off == 0)
+        rec["checks"]["offset0_vs_best"] = float(ratios[0] / max(ratios[best_off], 1e-9))
+        # Small objects rotate in place, so masks barely translate across frames and
+        # offsets near-tie; require offset 0 to be within 15% of the best rather than
+        # a strict argmax (a real misindexing loses by a decisive margin).
+        rec["pass"] = (ratios[0] >= MOTION_RATIO_MIN) and \
+                      (ratios[0] >= 0.85 * ratios[best_off])
 
     # anchor IoU where an alpha exists (initial frame = moving frame 0)
     key = (o, v, cfg.SIZES_DEG[s])
