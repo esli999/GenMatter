@@ -66,7 +66,7 @@ def memory_config_grid():
     # mechanisms; "_hoA" = always adopt the carried state, "_hoG" = guarded
     for base_name, k, lam in (("ho", 0.0, 0.0), ("sticky1_ho", 1.0, 0.0),
                               ("sticky1_filt0.5_ho", 1.0, 0.5)):
-        for mode, suf in (("guarded", "G"), ("always", "A")):
+        for mode, suf in (("guarded", "G"), ("always", "A"), ("static", "S")):
             grid.append(MemoryConfig(name=f"{base_name}{suf}", kappa=k,
                                      filter_lambda=lam, handoff=mode))
     return {m.name: m for m in grid}

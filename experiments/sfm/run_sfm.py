@@ -190,6 +190,7 @@ def main():
                 skipped += 1
                 continue
             carry = None
+            src_trusted = False   # has the carried grouping ever seen real motion?
             for sv in segs:
                 bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
                 if not bpath.exists():
@@ -197,11 +198,31 @@ def main():
                     carry = None
                     continue
                 arrays, meta = bundles.load_bundle(bpath)
+                frame_motion = np.asarray(arrays["motion_valid"]).mean(axis=1)
                 t0 = time.time()
                 try:
                     if mem.is_off():   # degenerate use: independent segments
                         results, out_arrays, traces = infer_window(arrays, mcfg,
                                                                    seed=seed)
+                    elif mem.handoff == "static":
+                        # Motion-trust policy: the assess-score guard cannot tell
+                        # good grouping from bad when velocity evidence is weak
+                        # (it accepted static-head garbage into moving segments,
+                        # -0.46 on seg2-3), so adopt the carried state ONLY into
+                        # static-init segments (whose fresh inits are near-chance)
+                        # and only from motion-trusted sources; moving-init
+                        # segments keep their excellent fresh inits.
+                        tgt_static = frame_motion[0] < 0.08
+                        use_carry = (carry is not None and src_trusted
+                                     and tgt_static)
+                        mem_seg = dataclasses.replace(
+                            mem, handoff="always" if use_carry else "none")
+                        results, out_arrays, traces, carry = infer_window_mem(
+                            arrays, mcfg, mem_seg, seed=seed,
+                            carry_in=carry if use_carry else None)
+                        results["handoff_used"] = use_carry
+                        src_trusted = bool(frame_motion.max() > 0.08) or \
+                            (use_carry and src_trusted)
                     else:
                         results, out_arrays, traces, carry = infer_window_mem(
                             arrays, mcfg, mem, seed=seed, carry_in=carry)
