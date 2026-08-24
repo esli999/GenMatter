@@ -71,6 +71,9 @@ def main():
                     help="write thinned all-latent traces.npz per window "
                          "(logging-only: config name and content hash are unchanged)")
     ap.add_argument("--trace-thin", type=int, default=0, help="0 = config default")
+    ap.add_argument("--memory", default="off",
+                    help="MemoryConfig name from memory_config_grid(); results are "
+                         "routed under <config>+<memory> when not 'off'")
     args = ap.parse_args()
 
     all_cfgs = dict(cfg.CONFIGS)
@@ -80,6 +83,12 @@ def main():
         import dataclasses as _dc
         mcfg = _dc.replace(mcfg, log_traces=True,
                            trace_thin=args.trace_thin or mcfg.trace_thin)
+
+    from experiments.sfm.memory_config import memory_config_grid
+    mem = memory_config_grid()[args.memory]
+    out_name = mem.result_name(mcfg.name)
+    if not mem.is_off():
+        from experiments.sfm.memory_algorithm import infer_window_mem
 
     rows = worklist.claim(worklist.read_manifest(args.manifest),
                           args.task_id, args.num_tasks)
@@ -91,16 +100,18 @@ def main():
     git_rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
                              capture_output=True, text=True).stdout.strip()
     print(f"task {args.task_id}/{args.num_tasks}: {len(rows)} rows, config={mcfg.name} "
-          f"(hash {mcfg.content_hash()}), git={git_rev}, manifest={args.manifest}, "
+          f"(hash {mcfg.content_hash()}), memory={mem.name}, out_name={out_name}, "
+          f"git={git_rev}, manifest={args.manifest}, "
           f"out_root={args.out_root}, seed_arg={args.seed}, "
           f"devices={jax.devices()}", flush=True)
     print("CONFIG " + json.dumps(dataclasses.asdict(mcfg), sort_keys=True), flush=True)
+    print("MEMORY " + json.dumps(dataclasses.asdict(mem), sort_keys=True), flush=True)
 
     t_start = time.time()
     done = skipped = 0
     times = []
     for sid, variant in rows:
-        if worklist.is_done(args.out_root, mcfg.name, variant, sid):
+        if worklist.is_done(args.out_root, out_name, variant, sid):
             skipped += 1
             continue
         bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, variant)
@@ -111,9 +122,13 @@ def main():
         seed = mcfg.seed if args.seed < 0 else args.seed
         t0 = time.time()
         try:
-            results, out_arrays, traces = infer_window(arrays, mcfg, seed=seed)
+            if mem.is_off():
+                results, out_arrays, traces = infer_window(arrays, mcfg, seed=seed)
+            else:
+                results, out_arrays, traces, _ = infer_window_mem(
+                    arrays, mcfg, mem, seed=seed)
         except Exception as e:  # degenerate windows etc.: record + move on
-            rdir = worklist.result_dir(args.out_root, mcfg.name, variant, sid)
+            rdir = worklist.result_dir(args.out_root, out_name, variant, sid)
             atomic_write(rdir / "results.json", lambda tmp: Path(tmp).write_text(
                 json.dumps({"stim_id": sid, "variant": variant, "error": str(e),
                             "config": mcfg.name})))
@@ -130,7 +145,7 @@ def main():
 
         results.update({"stim_id": sid, "variant": variant, "bundle_meta": meta,
                         "wall_s": dt})
-        rdir = worklist.result_dir(args.out_root, mcfg.name, variant, sid)
+        rdir = worklist.result_dir(args.out_root, out_name, variant, sid)
         atomic_write(rdir / "assignments.npz",
                      lambda tmp: np.savez_compressed(tmp, **out_arrays))
         if traces:  # flat "phase.latent" keys, e.g. "f2_track.blob_means"

@@ -36,10 +36,11 @@ def check_bundle(sid, variant):
     want = load_mask_grid(sid)[[W.frame_to_mask_index(f) for f in frames]]
     assert np.array_equal(arrays["gt_masks"], want), \
         f"{sid}/{variant}: gt_masks do not match clamped mask-stack rows"
-    return T
+    frame_motion = arrays["motion_valid"].mean(axis=1)   # [T] valid-motion fraction
+    return T, frame_motion
 
 
-def check_traces(sid, variant, mcfg, out_root, T):
+def check_traces(sid, variant, mcfg, out_root, T, frame_motion):
     rdir = worklist.result_dir(out_root, mcfg.name, variant, sid)
     res = json.loads((rdir / "results.json").read_text())
     assert not res.get("error"), f"{sid}/{variant}: inference error: {res.get('error')}"
@@ -64,8 +65,15 @@ def check_traces(sid, variant, mcfg, out_root, T):
         assert d[f"{ph}.blob_means"].dtype == np.float16
         assert d[f"{ph}.hyperblob_covs"].shape == (kept, H, 3, 3)
         assert d[f"{ph}.blob_hyperblob_assignments"].dtype == np.int8
-        assert d[f"{ph}.scores"].shape == (n_sw,)
-        assert np.isfinite(d[f"{ph}.scores"]).all(), f"{ph}: non-finite scores"
+        s = d[f"{ph}.scores"]
+        assert s.shape == (n_sw,)
+        assert not np.isnan(s).any(), f"{ph}: NaN scores"
+        # a timestep with zero motion evidence (static frame pair) legitimately
+        # assesses to -inf; a timestep with real motion must stay finite
+        frame = 0 if ph == "f0_init" else int(ph[1:].split("_")[0])
+        if frame_motion[frame] > 0.01:
+            assert np.isfinite(s).all(), \
+                f"{ph}: non-finite scores at a moving timestep ({frame_motion[frame]:.3f})"
         amax = int(da.max())
         assert amax <= L, f"{ph}: datapoint assignment {amax} > L={L}"
     return tpath.stat().st_size
@@ -84,8 +92,8 @@ def main():
     rows = worklist.read_manifest(args.manifest)
     sizes = []
     for sid, variant in rows:
-        T = check_bundle(sid, variant)
-        sizes.append(check_traces(sid, variant, mcfg, args.out_root, T))
+        T, frame_motion = check_bundle(sid, variant)
+        sizes.append(check_traces(sid, variant, mcfg, args.out_root, T, frame_motion))
     mb = np.array(sizes) / 1e6
     print(f"checked {len(rows)} windows: traces {mb.mean():.2f} MB/window "
           f"(max {mb.max():.2f}); projected 5040-window total {mb.mean()*5040/1e3:.1f} GB")

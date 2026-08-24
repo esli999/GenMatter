@@ -72,6 +72,27 @@ VELOCITY_UPDATE_DIALS = {
 _PROGRAM_CACHE = {}
 
 
+def latent_trace(st):
+    """Every latent variable of the probabilistic program, dtype-compacted for the
+    per-sweep trace (observed inputs — datapoint positions/vels — are never traced)."""
+    hb, bl = st.hyperblobs_state, st.blobs_state
+    return {
+        "hyperblob_weights": hb.hyperblob_weights,
+        "hyperblob_means": hb.hyperblob_means,
+        "hyperblob_covs": hb.hyperblob_covs,
+        "hyperblob_trans_vels": hb.hyperblob_trans_vels,
+        "hyperblob_rot_vels": hb.hyperblob_rot_vels,
+        "blob_hyperblob_assignments": bl.hyperblob_assignments.astype(jnp.int8),
+        "blob_weights": bl.blob_weights.astype(jnp.float16),
+        "blob_means": bl.blob_means.astype(jnp.float16),
+        "blob_covs": bl.blob_covs.astype(jnp.float16),
+        "blob_vel_means": bl.blob_vel_means.astype(jnp.float16),
+        "blob_vel_covs": bl.blob_vel_covs.astype(jnp.float16),
+        "datapoint_assignments": st.datapoints_state.blob_assignments
+            .astype(jnp.int16),
+    }
+
+
 def get_phase_program(num_sweeps: int, keep_last: int, rescore_stride: int,
                       emit_traces: bool = False, trace_thin: int = 5):
     """Jitted: (key, state, dials, inner, weighted) ->
@@ -101,24 +122,7 @@ def get_phase_program(num_sweeps: int, keep_last: int, rescore_stride: int,
             best_state = jax.tree_util.tree_map(
                 lambda n, o: jnp.where(better, n, o), st, best_state)
             best_score = jnp.where(better, cand, best_score)
-            tr = {}
-            if emit_traces:
-                hb, bl = st.hyperblobs_state, st.blobs_state
-                tr = {
-                    "hyperblob_weights": hb.hyperblob_weights,
-                    "hyperblob_means": hb.hyperblob_means,
-                    "hyperblob_covs": hb.hyperblob_covs,
-                    "hyperblob_trans_vels": hb.hyperblob_trans_vels,
-                    "hyperblob_rot_vels": hb.hyperblob_rot_vels,
-                    "blob_hyperblob_assignments": bl.hyperblob_assignments.astype(jnp.int8),
-                    "blob_weights": bl.blob_weights.astype(jnp.float16),
-                    "blob_means": bl.blob_means.astype(jnp.float16),
-                    "blob_covs": bl.blob_covs.astype(jnp.float16),
-                    "blob_vel_means": bl.blob_vel_means.astype(jnp.float16),
-                    "blob_vel_covs": bl.blob_vel_covs.astype(jnp.float16),
-                    "datapoint_assignments": st.datapoints_state.blob_assignments
-                        .astype(jnp.int16),
-                }
+            tr = latent_trace(st) if emit_traces else {}
             ys = (st.datapoints_state.blob_assignments.astype(jnp.int32),
                   st.blobs_state.hyperblob_assignments.astype(jnp.int32),
                   score, tr)
@@ -173,26 +177,11 @@ def build_hypers(mcfg: cfg.SfmModelConfig, kmeans_chm, roi_blob_idx, roi_hyper_i
     )
 
 
-def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
-    """Run the full window schedule (init frame + T-1 tracked frames) on one bundle.
-
-    Returns (results, arrays_out, traces): `traces` is {} unless mcfg.log_traces, else
-    {phase_name: {latent: np.ndarray}} with phase names f0_init, f{k}_vel, f{k}_track —
-    every latent in the probabilistic program (hyperblob weights/means/covs/vels, blob
-    assignments/weights/means/covs/velocities, datapoint assignments, joint scores),
-    thinned by mcfg.trace_thin and dtype-compacted inside the jitted scan. Observed
-    inputs (datapoint positions/velocities, i.e. pixel depth/flow) are never traced."""
-    t_start = time.time()
-    seed = mcfg.seed if seed is None else seed
-    points = np.asarray(arrays["points_3d"], np.float32)     # (5, N, 3)
-    motion = np.asarray(arrays["motion_3d"], np.float32)
-    valid = np.asarray(arrays["motion_valid"], bool)
-    depth_sq = np.asarray(arrays["depth_sq"], np.float32)
-    flow_sq = np.asarray(arrays["flow_sq"], np.float32)
-    gt_masks = np.asarray(arrays["gt_masks"], bool)          # (6, G, G); eval uses [0:5]
-    G = cfg.GRID_HW
-
-    # --- init structures (CPU, once per window)
+def init_window_state(points, motion, valid, depth_sq, flow_sq,
+                      mcfg: cfg.SfmModelConfig, seed: int):
+    """CPU init structures for one window: ROI heuristic (+ top-K flow fallback),
+    hierarchical k-means with the pinned blob count, empirical hypers, importance
+    init. Returns (state, key, combined_roi_mask, roi_fallback)."""
     if mcfg.roi_heuristic == "sfm_flow":
         combined = sfm_flow_roi(flow_sq, mcfg.roi_flow_floor)
     else:
@@ -226,7 +215,30 @@ def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
     key = jkey(seed)
     key, k_imp = jax.random.split(key)
     init_tr, _ = model_jimportance(k_imp, kmeans_chm, (hypers,))
-    state = init_tr.get_retval()
+    return init_tr.get_retval(), key, combined, roi_fallback
+
+
+def infer_window(arrays: dict, mcfg: cfg.SfmModelConfig, seed: int = None):
+    """Run the full window schedule (init frame + T-1 tracked frames) on one bundle.
+
+    Returns (results, arrays_out, traces): `traces` is {} unless mcfg.log_traces, else
+    {phase_name: {latent: np.ndarray}} with phase names f0_init, f{k}_vel, f{k}_track —
+    every latent in the probabilistic program (hyperblob weights/means/covs/vels, blob
+    assignments/weights/means/covs/velocities, datapoint assignments, joint scores),
+    thinned by mcfg.trace_thin and dtype-compacted inside the jitted scan. Observed
+    inputs (datapoint positions/velocities, i.e. pixel depth/flow) are never traced."""
+    t_start = time.time()
+    seed = mcfg.seed if seed is None else seed
+    points = np.asarray(arrays["points_3d"], np.float32)     # (5, N, 3)
+    motion = np.asarray(arrays["motion_3d"], np.float32)
+    valid = np.asarray(arrays["motion_valid"], bool)
+    depth_sq = np.asarray(arrays["depth_sq"], np.float32)
+    flow_sq = np.asarray(arrays["flow_sq"], np.float32)
+    gt_masks = np.asarray(arrays["gt_masks"], bool)          # (6, G, G); eval uses [0:5]
+    G = cfg.GRID_HW
+
+    state, key, combined, roi_fallback = init_window_state(
+        points, motion, valid, depth_sq, flow_sq, mcfg, seed)
 
     emit = bool(mcfg.log_traces)
     p_init = get_phase_program(mcfg.init_sweeps, mcfg.keep_last_samples, mcfg.rescore_stride,
