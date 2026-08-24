@@ -200,11 +200,11 @@ def _mem_programs(mcfg):
 
 
 def _run_frames(state, key, points, motion, mcfg, mem, base, per_frame,
-                dev_traces, frame_offset, G, p_vel, p_track):
+                dev_traces, frame_offset, G, p_vel, p_track, frame_evidence):
     """Track frames 1..T-1 of one window from an accepted frame-0 state."""
     for f in range(1, points.shape[0]):
         state = propagate_state(state, points[f], motion[f])
-        aux = frame_aux(state, mem, base)
+        aux = frame_aux(state, mem, base, vel_evidence=frame_evidence[f])
         key, k1, k2 = jax.random.split(key, 3)
         _, best, _, _, _, _, tr_v = p_vel(k1, state, VELOCITY_UPDATE_DIALS,
                                           mcfg.inner_loops, True, aux)
@@ -260,7 +260,8 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
         hstate = propagate_state(carry_in["state"], points[0], motion[0])
         base_h = base_aux(hstate, kappa=mem.kappa,
                           kappa_sel=mem.kappa_sel_resolved())
-        haux = frame_aux(hstate, mem, base_h)
+        ev0 = float(np.clip(valid[0].mean() / mem.vel_evidence_floor, 0.0, 1.0))
+        haux = frame_aux(hstate, mem, base_h, vel_evidence=ev0)
         hkey = carry_in["key"]
         hkey, hk1, hk2 = jax.random.split(hkey, 3)
         _, hbest, _, _, _, _, _ = p_vel(hk1, hstate, VELOCITY_UPDATE_DIALS,
@@ -283,8 +284,10 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
     per_frame = [_frame_summary(state, ba, ha, scores, mcfg, G)]
 
     base = base_aux(state, kappa=mem.kappa, kappa_sel=mem.kappa_sel_resolved())
+    frame_evidence = np.clip(valid.mean(axis=1) / mem.vel_evidence_floor, 0.0, 1.0)
     state, key = _run_frames(state, key, points, motion, mcfg, mem, base,
-                             per_frame, dev_traces, 0, G, p_vel, p_track)
+                             per_frame, dev_traces, 0, G, p_vel, p_track,
+                             frame_evidence)
 
     jax.block_until_ready(state.datapoints_state.blob_assignments)
     t_infer = time.time() - t_start

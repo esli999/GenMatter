@@ -24,6 +24,11 @@ class MemoryConfig:
     # memory entrenches stale motion at cessation (frames where motion stops):
     # the filtered prior says "still moving" while the data says zero.
     filter_velocity: bool = True
+    # True = scale the VELOCITY filter strength by the current frame's motion
+    # evidence (valid-motion fraction / vel_evidence_floor, capped at 1): full
+    # velocity memory while motion persists, stock velocities at cessation.
+    adaptive_vel: bool = False
+    vel_evidence_floor: float = 0.08
     # forward-backward: 2 = rerun forward with next-frame-informed priors
     smooth_passes: int = 1
     # multi-particle SMC (1 = single chain)
@@ -68,6 +73,8 @@ def memory_config_grid():
         grid.append(MemoryConfig(name=f"filt{lam:g}", filter_lambda=lam))
         grid.append(MemoryConfig(name=f"filt{lam:g}p", filter_lambda=lam,
                                  filter_velocity=False))
+        grid.append(MemoryConfig(name=f"filt{lam:g}a", filter_lambda=lam,
+                                 adaptive_vel=True))
     # cross-segment handoff (whole-video memory), composed with the in-window
     # mechanisms; "_hoA" = always adopt the carried state, "_hoG" = guarded
     for base_name, k, lam in (("ho", 0.0, 0.0), ("sticky1_ho", 1.0, 0.0),

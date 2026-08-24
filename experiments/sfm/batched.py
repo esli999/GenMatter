@@ -130,7 +130,12 @@ def infer_windows_batched(batch, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
     vbase_aux = jax.jit(jax.vmap(
         lambda st: base_aux(st, kappa=mem.kappa,
                             kappa_sel=mem.kappa_sel_resolved())))
-    vframe_aux = jax.jit(jax.vmap(lambda st, b: frame_aux(st, mem, b)))
+    vframe_aux = jax.jit(jax.vmap(
+        lambda st, b, ev: frame_aux(st, mem, b, vel_evidence=ev)))
+    # per-window per-frame velocity-evidence scale [B, T]
+    evidence = jnp.asarray(np.clip(
+        np.stack([arrs[i]["motion_valid"].mean(axis=1) for i in live])
+        / mem.vel_evidence_floor, 0.0, 1.0), jnp.float32)
 
     state = pytree_stack(states)
     aux0 = vbase_aux0(state)                            # init frame: kappa = 0
@@ -145,7 +150,7 @@ def infer_windows_batched(batch, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
     base = vbase_aux(state)
     for f in range(1, T):
         state = _vpropagate(state, points[:, f], motion[:, f])
-        aux = vframe_aux(state, base)
+        aux = vframe_aux(state, base, evidence[:, f])
         keys, k1, k2 = _vsplit(keys, 3)
         _, best, _, _, _, _, tr_v = p_vel(k1, state, VELOCITY_UPDATE_DIALS,
                                           mcfg.inner_loops, True, aux)

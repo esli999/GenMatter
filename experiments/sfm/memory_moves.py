@@ -74,7 +74,7 @@ def base_aux(state, kappa=0.0, kappa_sel=None, use_filter=False):
     )
 
 
-def frame_aux(state, mem, base):
+def frame_aux(state, mem, base, vel_evidence=1.0):
     """MemAux for a tracked frame, built from the POST-PROPAGATE state (blob means
     have ridden the rigid transform; covs/vel means carry the previous frame's
     accepted samples; datapoint assignments carry the previous frame's grouping).
@@ -86,6 +86,10 @@ def frame_aux(state, mem, base):
       eigenvalue-truncated after every blend.
     - Mean priors: mu0 = propagated means; Sigma0 = cov_prev/(lam*N_l) + q*I
       (per-blob confidence from occupancy, floored by process noise q).
+    - With mem.adaptive_vel, the VELOCITY memory strength is scaled by
+      `vel_evidence` (traced scalar in [0,1], from the current frame's
+      valid-motion fraction): stale motion is never asserted against a frame
+      with no motion evidence.
     """
     lam = jnp.float32(mem.filter_lambda)
     anchor = state.datapoints_state.blob_assignments.astype(jnp.int32)
@@ -111,10 +115,14 @@ def frame_aux(state, mem, base):
     mu_Sigma0 = covs / (lam * occ) + mem.process_noise_q * eye
 
     if mem.filter_velocity:
+        lam_v = lam * (jnp.clip(jnp.float32(vel_evidence), 0.0, 1.0)
+                       if mem.adaptive_vel else 1.0)
         Psi_V = truncate_eigenval_ratio(
-            (1.0 - lam) * base.Psi_V + lam * (base.nu_V[:, None, None] + d + 1) * vcovs,
+            (1.0 - lam_v) * base.Psi_V
+            + lam_v * (base.nu_V[:, None, None] + d + 1) * vcovs,
             threshold=1e6)
-        vel_Sigma0 = vcovs / (lam * occ) + mem.vel_process_noise_q * eye
+        vel_Sigma0 = vcovs / (jnp.maximum(lam_v, 1e-6) * occ) \
+            + mem.vel_process_noise_q * eye
         vel_mu0 = state.blobs_state.blob_vel_means
     else:
         # position/shape memory only: velocity priors stay effectively stock
