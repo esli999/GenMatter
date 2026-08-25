@@ -29,6 +29,10 @@ class MemoryConfig:
     # velocity memory while motion persists, stock velocities at cessation.
     adaptive_vel: bool = False
     vel_evidence_floor: float = 0.08
+    # with adaptive_vel: True = binary gate (full velocity memory iff the frame's
+    # motion fraction clears the floor, zero below — a linear scale still leaves
+    # enough stale-velocity prior at cessation to cost ~-0.1 there)
+    vel_gate_binary: bool = False
     # forward-backward: 2 = rerun forward with next-frame-informed priors
     smooth_passes: int = 1
     # multi-particle SMC (1 = single chain)
@@ -75,6 +79,8 @@ def memory_config_grid():
                                  filter_velocity=False))
         grid.append(MemoryConfig(name=f"filt{lam:g}a", filter_lambda=lam,
                                  adaptive_vel=True))
+        grid.append(MemoryConfig(name=f"filt{lam:g}b", filter_lambda=lam,
+                                 adaptive_vel=True, vel_gate_binary=True))
     # cross-segment handoff (whole-video memory), composed with the in-window
     # mechanisms; "_hoA" = always adopt the carried state, "_hoG" = guarded
     for base_name, k, lam in (("ho", 0.0, 0.0), ("sticky1_ho", 1.0, 0.0),

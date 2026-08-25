@@ -115,8 +115,12 @@ def frame_aux(state, mem, base, vel_evidence=1.0):
     mu_Sigma0 = covs / (lam * occ) + mem.process_noise_q * eye
 
     if mem.filter_velocity:
-        lam_v = lam * (jnp.clip(jnp.float32(vel_evidence), 0.0, 1.0)
-                       if mem.adaptive_vel else 1.0)
+        if mem.adaptive_vel:
+            ev = jnp.clip(jnp.float32(vel_evidence), 0.0, 1.0)
+            scale = jnp.where(ev >= 1.0, 1.0, 0.0) if mem.vel_gate_binary else ev
+        else:
+            scale = 1.0
+        lam_v = lam * scale
         Psi_V = truncate_eigenval_ratio(
             (1.0 - lam_v) * base.Psi_V
             + lam_v * (base.nu_V[:, None, None] + d + 1) * vcovs,
