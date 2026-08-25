@@ -88,4 +88,9 @@ def memory_config_grid():
         for mode, suf in (("guarded", "G"), ("always", "A"), ("static", "S")):
             grid.append(MemoryConfig(name=f"{base_name}{suf}", kappa=k,
                                      filter_lambda=lam, handoff=mode))
+    # bidirectional static rescue on the adaptive-velocity filter winner
+    for lam in (0.5, 0.7):
+        grid.append(MemoryConfig(name=f"filt{lam:g}b_hoB", filter_lambda=lam,
+                                 adaptive_vel=True, vel_gate_binary=True,
+                                 handoff="static_bi"))
     return {m.name: m for m in grid}

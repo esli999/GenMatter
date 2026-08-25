@@ -282,6 +282,7 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
 
     dev_traces = {"f0_init": tr}
     per_frame = [_frame_summary(state, ba, ha, scores, mcfg, G)]
+    state0 = state          # frame-0 accepted state (backward/head handoffs)
 
     base = base_aux(state, kappa=mem.kappa, kappa_sel=mem.kappa_sel_resolved())
     frame_evidence = np.clip(valid.mean(axis=1) / mem.vel_evidence_floor, 0.0, 1.0)
@@ -302,5 +303,5 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
     results["fresh_score"] = float(fresh_score)
     if hand_score is not None:
         results["handoff_score"] = hand_score
-    carry_out = {"state": state, "key": key}
+    carry_out = {"state": state, "key": key, "state0": state0}
     return results, arrays_out, traces, carry_out

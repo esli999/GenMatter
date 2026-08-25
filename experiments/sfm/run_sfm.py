@@ -189,9 +189,27 @@ def main():
             if all(worklist.is_done(args.out_root, out_name, sv, sid) for sv in segs):
                 skipped += 1
                 continue
+            # static_bi: the static HEAD shows the same pose as the first moving
+            # frames, so run the first moving-init segment FIRST and hand its
+            # frame-0 grouping backward into the head statics (nearest first);
+            # then continue forward as in 'static'.
+            order = list(segs)
+            head_carry = None
+            if mem.handoff == "static_bi":
+                inits = {}
+                for sv in segs:
+                    bp = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
+                    if bp.exists():
+                        a, _ = bundles.load_bundle(bp)
+                        inits[sv] = float(np.asarray(a["motion_valid"])[0].mean())
+                moving = [sv for sv in segs if inits.get(sv, 0.0) >= 0.08]
+                if moving:
+                    first = moving[0]
+                    i0 = segs.index(first)
+                    order = [first] + segs[:i0][::-1] + segs[i0 + 1:]
             carry = None
             src_trusted = False   # has the carried grouping ever seen real motion?
-            for sv in segs:
+            for sv in order:
                 bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
                 if not bpath.exists():
                     print(f"MISSING bundle {bpath} — skipping video {sid}", flush=True)
@@ -204,7 +222,7 @@ def main():
                     if mem.is_off():   # degenerate use: independent segments
                         results, out_arrays, traces = infer_window(arrays, mcfg,
                                                                    seed=seed)
-                    elif mem.handoff == "static":
+                    elif mem.handoff in ("static", "static_bi"):
                         # Motion-trust policy: the assess-score guard cannot tell
                         # good grouping from bad when velocity evidence is weak
                         # (it accepted static-head garbage into moving segments,
@@ -213,16 +231,31 @@ def main():
                         # and only from motion-trusted sources; moving-init
                         # segments keep their excellent fresh inits.
                         tgt_static = bool(frame_motion[0] < 0.08)
-                        use_carry = bool(carry is not None and src_trusted
+                        backward = (head_carry is not None
+                                    and segs.index(sv) < segs.index(order[0]))
+                        cin = head_carry if backward else carry
+                        trusted = True if backward else src_trusted
+                        use_carry = bool(cin is not None and trusted
                                          and tgt_static)
                         mem_seg = dataclasses.replace(
                             mem, handoff="always" if use_carry else "none")
-                        results, out_arrays, traces, carry = infer_window_mem(
+                        results, out_arrays, traces, cout = infer_window_mem(
                             arrays, mcfg, mem_seg, seed=seed,
-                            carry_in=carry if use_carry else None)
+                            carry_in=cin if use_carry else None)
                         results["handoff_used"] = use_carry
-                        src_trusted = bool(frame_motion.max() > 0.08) or \
-                            (use_carry and src_trusted)
+                        results["handoff_backward"] = bool(backward)
+                        if backward:
+                            # chain head rescues backward, nearest-first
+                            head_carry = {"state": cout["state0"],
+                                          "key": cout["key"]}
+                        else:
+                            carry = cout
+                            src_trusted = bool(frame_motion.max() > 0.08) or \
+                                (use_carry and src_trusted)
+                            if (mem.handoff == "static_bi" and sv == order[0]
+                                    and src_trusted):
+                                head_carry = {"state": cout["state0"],
+                                              "key": cout["key"]}
                     else:
                         results, out_arrays, traces, carry = infer_window_mem(
                             arrays, mcfg, mem, seed=seed, carry_in=carry)
