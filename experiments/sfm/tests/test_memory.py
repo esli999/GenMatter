@@ -101,6 +101,34 @@ def main():
         assert np.isfinite(np.asarray(leaf)).all(), "filtered state not finite"
     print("filtering (off-equivalence + finite filtered chain): PASS")
 
+    # --- 5. Evidence-conditioned freezing: at full evidence the freeze term
+    # vanishes (aux identical to plain sticky); at zero evidence kappa_eff =
+    # kappa + freeze_kappa and a frozen chain keeps (almost) every anchor label
+    mem_frz = MemoryConfig(name="t_frz", kappa=1.0, freeze_kappa=100.0)
+    aux_ev1 = frame_aux(st2, mem_frz, base, vel_evidence=1.0)
+    assert float(aux_ev1.kappa) == 1.0, "freeze must vanish at full evidence"
+    aux_ev0 = frame_aux(st2, mem_frz, base, vel_evidence=0.0)
+    assert float(aux_ev0.kappa) == 101.0, "freeze kappa_eff wrong at zero evidence"
+    last_z, *_ = mprog(jkey(77), st2, GIBBS_DIALS, TINY.inner_loops, True, aux_ev0)
+    frozen_matches = int(jnp.sum(last_z.datapoints_state.blob_assignments
+                                 == aux_ev0.prev_assign))
+    n = aux_ev0.prev_assign.shape[0]
+    assert frozen_matches >= 0.9 * n, \
+        f"frozen chain kept only {frozen_matches}/{n} anchor labels"
+    print(f"evidence-conditioned freeze: PASS ({frozen_matches}/{n} held at ev=0)")
+
+    # --- 6. Marginal data likelihood: finite; prefers the fit state over a
+    # shuffled-means corruption of it (the grouping-aware acceptance criterion)
+    from experiments.sfm.memory_algorithm import marginal_data_loglik
+    good = float(marginal_data_loglik(last_b))
+    perm = jax.random.permutation(jkey(5), last_b.blobs_state.blob_means.shape[0])
+    corrupt = last_b.replace(
+        {"blobs_state": {"blob_means": last_b.blobs_state.blob_means[perm]}})
+    bad = float(marginal_data_loglik(corrupt))
+    assert np.isfinite(good) and np.isfinite(bad)
+    assert good > bad, f"marginal loglik did not prefer the fit state ({good} <= {bad})"
+    print(f"marginal data loglik ranks fit > corrupted: PASS ({good:.2f} > {bad:.2f})")
+
     print("test_memory: PASS")
 
 

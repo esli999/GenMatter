@@ -59,7 +59,9 @@ def main():
 
     if args.variants == "all":
         variants = list(W.PILOT_VARIANTS)
-    elif args.variants == "exp":          # metadata-aligned (preferred)
+    elif args.variants == "exp2":         # metadata-aligned + 1-frame overlap (preferred)
+        variants = list(W.EXP2_SEGMENTS)
+    elif args.variants == "exp":          # metadata-aligned, 19/24 frames evaluated
         variants = list(W.EXP_SEGMENTS)
     elif args.variants == "segments":     # legacy blind tiles
         variants = sorted(W.SEGMENT_VARIANTS)

@@ -29,6 +29,23 @@ EXP_SEGMENTS = {
     "hold2": (18, 19, 20, 21, 22, 23),
 }
 
+# EXP2: same cuts, one-frame forward overlap so every frame gets a model output.
+# A window of F frames evaluates frames[:-1] (each needs its outgoing flow pair),
+# so EXP_SEGMENTS leaves the five segment-final frames (5, 9, 13, 17, 23)
+# unevaluated. Extending each window one frame into the next segment closes the
+# gap without moving any init frame off its epoch start and without evaluating
+# any frame twice: the boundary pairs are (5,6) and (17,18), both zero-motion by
+# construction (frame 6 re-shows the hold; frame 18 holds init+11). Frame 23 has
+# no successor, so hold2x repeats it — a self-pair with identically zero flow
+# (the preprocessor short-circuits i==j pairs), which is exact for a static hold.
+EXP2_SEGMENTS = {
+    "hold1x": (0, 1, 2, 3, 4, 5, 6),
+    "m0x":    (6, 7, 8, 9, 10),
+    "m1x":    (10, 11, 12, 13, 14),
+    "m2x":    (14, 15, 16, 17, 18),
+    "hold2x": (18, 19, 20, 21, 22, 23, 23),
+}
+
 WINDOW_VARIANTS = {
     "tiledA":   (6, 7, 8, 9, 10, 11),
     "tiledB":   (12, 13, 14, 15, 16, 17),
@@ -36,6 +53,7 @@ WINDOW_VARIANTS = {
     "stride2":  (6, 8, 10, 12, 14, 16),
     **SEGMENT_VARIANTS,
     **EXP_SEGMENTS,
+    **EXP2_SEGMENTS,
 }
 
 PILOT_VARIANTS = ("tiledA", "tiledB", "centered", "stride2")
@@ -54,7 +72,8 @@ def default_gated(variant: str) -> bool:
     """Segments are always evidence-gated (a no-op on textured stimuli); phase-1
     variants opt in via the '_g' suffix so gated/ungated A-B results stay distinct."""
     return (is_gated(variant) or base_variant(variant) in SEGMENT_VARIANTS
-            or base_variant(variant) in EXP_SEGMENTS)
+            or base_variant(variant) in EXP_SEGMENTS
+            or base_variant(variant) in EXP2_SEGMENTS)
 
 
 def window_frames(variant: str):

@@ -33,6 +33,13 @@ class MemoryConfig:
     # motion fraction clears the floor, zero below — a linear scale still leaves
     # enough stale-velocity prior at cessation to cost ~-0.1 there)
     vel_gate_binary: bool = False
+    # evidence-conditioned assignment freezing: extra sticky strength
+    # freeze_kappa*(1 - evidence) added to kappa (and to the selection bonus).
+    # At zero motion evidence the anchor grouping is strongly held — in SFM
+    # textured statics the object is invisible (uniform texture), so ONLY a
+    # carried grouping can bridge the holds; without this it decays to prior.
+    # At full evidence the term vanishes and the chain is the plain sticky one.
+    freeze_kappa: float = 0.0
     # forward-backward: 2 = rerun forward with next-frame-informed priors
     smooth_passes: int = 1
     # multi-particle SMC (1 = single chain)
@@ -45,6 +52,7 @@ class MemoryConfig:
 
     def is_off(self) -> bool:
         return (self.kappa == 0.0 and self.filter_lambda == 0.0
+                and self.freeze_kappa == 0.0
                 and self.smooth_passes == 1 and self.n_particles == 1
                 and self.handoff == "none")
 
@@ -93,4 +101,16 @@ def memory_config_grid():
         grid.append(MemoryConfig(name=f"filt{lam:g}b_hoB", filter_lambda=lam,
                                  adaptive_vel=True, vel_gate_binary=True,
                                  handoff="static_bi"))
+    # evidence-conditioned assignment freezing on the winner (kappa_frz sweep),
+    # and the predictive-acceptance handoff ("static_pred": motion-trust offer
+    # set, accept/reject by held-out-free marginal data likelihood)
+    for kf in (20.0, 100.0):
+        grid.append(MemoryConfig(name=f"filt0.7b_hoB_frz{kf:g}",
+                                 filter_lambda=0.7, adaptive_vel=True,
+                                 vel_gate_binary=True, handoff="static_bi",
+                                 freeze_kappa=kf))
+        grid.append(MemoryConfig(name=f"filt0.7b_hoP_frz{kf:g}",
+                                 filter_lambda=0.7, adaptive_vel=True,
+                                 vel_gate_binary=True, handoff="static_pred",
+                                 freeze_kappa=kf))
     return {m.name: m for m in grid}

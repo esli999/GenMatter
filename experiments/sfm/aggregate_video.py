@@ -31,6 +31,10 @@ SEGSETS = {
     "exp": {"segments": list(W.EXP_SEGMENTS),
             "moving": ["m0", "m1", "m2"],
             "static": ["hold1", "hold2"]},
+    # exp + one-frame overlap: every frame carries model output (24/24)
+    "exp2": {"segments": list(W.EXP2_SEGMENTS),
+             "moving": ["m0x", "m1x", "m2x"],
+             "static": ["hold1x", "hold2x"]},
 }
 
 

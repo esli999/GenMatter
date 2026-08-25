@@ -93,10 +93,18 @@ def frame_aux(state, mem, base, vel_evidence=1.0):
     """
     lam = jnp.float32(mem.filter_lambda)
     anchor = state.datapoints_state.blob_assignments.astype(jnp.int32)
+    # evidence-conditioned freezing: at zero motion evidence the anchor grouping
+    # is held with strength kappa + freeze_kappa; at full evidence the extra term
+    # vanishes. Applies to the move logits AND the selection bonus.
+    ev_frz = jnp.clip(jnp.float32(vel_evidence), 0.0, 1.0)
+    kappa_eff = jnp.float32(mem.kappa) + jnp.float32(mem.freeze_kappa) * (1.0 - ev_frz)
+    kappa_sel_eff = (kappa_eff if mem.kappa_sel < 0 else
+                     jnp.float32(mem.kappa_sel)
+                     + jnp.float32(mem.freeze_kappa) * (1.0 - ev_frz))
     if mem.filter_lambda <= 0.0:
         return base._replace(prev_assign=anchor,
-                             kappa=jnp.float32(mem.kappa),
-                             kappa_sel=jnp.float32(mem.kappa_sel_resolved()),
+                             kappa=kappa_eff,
+                             kappa_sel=kappa_sel_eff,
                              mu_mu0=state.blobs_state.blob_means,
                              vel_mu0=state.blobs_state.blob_vel_means)
 
@@ -139,8 +147,8 @@ def frame_aux(state, mem, base, vel_evidence=1.0):
 
     return MemAux(
         prev_assign=anchor,
-        kappa=jnp.float32(mem.kappa),
-        kappa_sel=jnp.float32(mem.kappa_sel_resolved()),
+        kappa=kappa_eff,
+        kappa_sel=kappa_sel_eff,
         use_filter=jnp.asarray(True),
         nu_B=base.nu_B, Psi_B=Psi_B, nu_V=base.nu_V, Psi_V=Psi_V,
         mu_mu0=state.blobs_state.blob_means, mu_Sigma0=mu_Sigma0,

@@ -67,11 +67,16 @@ def raft_preprocess(frames_u8: torch.Tensor) -> torch.Tensor:
 
 @torch.inference_mode()
 def compute_flows(raft, frames_rgb: np.ndarray, pairs, device="cuda", batch_size=4):
-    """Flow for the given (i, j) frame-index pairs -> dict[(i, j)] = (H, W, 2) float32."""
+    """Flow for the given (i, j) frame-index pairs -> dict[(i, j)] = (H, W, 2) float32.
+    Self-pairs (i == j, the hold2x terminal pad) are identically zero by definition."""
     out = {}
-    pairs = list(pairs)
-    for b0 in range(0, len(pairs), batch_size):
-        chunk = pairs[b0:b0 + batch_size]
+    H, W_ = frames_rgb.shape[1:3]
+    real = [p for p in pairs if p[0] != p[1]]
+    for p in pairs:
+        if p[0] == p[1]:
+            out[p] = np.zeros((H, W_, 2), np.float32)
+    for b0 in range(0, len(real), batch_size):
+        chunk = real[b0:b0 + batch_size]
         a = torch.from_numpy(frames_rgb[[i for i, _ in chunk]]).to(device)
         b = torch.from_numpy(frames_rgb[[j for _, j in chunk]]).to(device)
         flows = raft(raft_preprocess(a), raft_preprocess(b))[-1]      # (B, 2, H, W)
@@ -109,7 +114,27 @@ def resize_grid(arr: np.ndarray) -> np.ndarray:
     return out.astype(np.float16)
 
 
-EVIDENCE_LUM_THRESH = 8  # uint8: below this in BOTH frames of a pair = no flow evidence
+EVIDENCE_LUM_THRESH = 8   # uint8: below this in BOTH frames of a pair -> check gradient
+# Gate v2: a pixel carries correspondence evidence if it is bright OR sits within a
+# few px of local image structure (dilated Sobel magnitude). The OR keeps shaded
+# unchanged (bright object passes luminance; true-black background fails both) and
+# stops the gate from zeroing real object evidence inside dark textures
+# (texture_21). Calibrated by experiments/sfm/calibrate_gate.py (job 21237099):
+# the shaded far-background is EXACTLY zero in both luminance and gradient, so
+# any positive threshold preserves the shaded rescue; texture_21 object coverage
+# is 51-59% at tau=6 (vs 7-8% with luminance alone), rising with dilation reach.
+EVIDENCE_GRAD_THRESH = 6.0
+EVIDENCE_GRAD_DILATE = 7
+
+
+def grad_energy(gray_u8: np.ndarray) -> np.ndarray:
+    """Per-frame dilated Sobel magnitude (float32, same HxW)."""
+    g = gray_u8.astype(np.float32)
+    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    mag = cv2.magnitude(gx, gy)
+    k = np.ones((EVIDENCE_GRAD_DILATE, EVIDENCE_GRAD_DILATE), np.uint8)
+    return cv2.dilate(mag, k)
 
 
 def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
@@ -153,8 +178,13 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
         # frames. Textured stimuli are unaffected.
         gated = W.default_gated(variant)
         if gated:
+            if not hasattr(process_video, "_grad") or process_video._grad[0] != stim_id:
+                process_video._grad = (stim_id, np.stack([grad_energy(g)
+                                                          for g in frames_gray]))
+            frames_grad = process_video._grad[1]
             ev_full = np.stack([
-                np.maximum(frames_gray[a], frames_gray[b]) > EVIDENCE_LUM_THRESH
+                (np.maximum(frames_gray[a], frames_gray[b]) > EVIDENCE_LUM_THRESH)
+                | (np.maximum(frames_grad[a], frames_grad[b]) > EVIDENCE_GRAD_THRESH)
                 for a, b in W.flow_pairs(variant)])                  # (F-1, 1024, 1024)
             flow_win = flow_win * ev_full[..., None]
 
@@ -186,6 +216,9 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
                 "viewpoint_id": row["viewpoint_id"], "size_deg": row["size_deg"],
                 "depth_rescale_factor": factor, "inv_depth_median_raw": med,
                 "evidence_gate": gated,
+                "evidence_gate_version": (f"lum{EVIDENCE_LUM_THRESH}|grad"
+                                          f"{EVIDENCE_GRAD_THRESH:g}d{EVIDENCE_GRAD_DILATE}"
+                                          if gated else None),
                 "min_motion_magnitude": model_cfg.min_motion_magnitude,
                 "focal_length_scale": model_cfg.focal_length_scale,
                 "git_rev": GIT_REV,
@@ -209,7 +242,9 @@ def main():
     ap.add_argument("--save-raw", action="store_true")
     args = ap.parse_args()
 
-    if args.variants == "exp":            # metadata-aligned (preferred)
+    if args.variants == "exp2":           # metadata-aligned + 1-frame overlap (preferred)
+        variants = list(W.EXP2_SEGMENTS)
+    elif args.variants == "exp":          # metadata-aligned, 19/24 frames evaluated
         variants = list(W.EXP_SEGMENTS)
     elif args.variants == "segments":     # legacy blind tiles
         variants = sorted(W.SEGMENT_VARIANTS)

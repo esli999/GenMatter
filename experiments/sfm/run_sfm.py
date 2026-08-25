@@ -200,9 +200,10 @@ def main():
         # "video" = the blind 4-frame tiles seg0..seg5; "videoX" = the
         # metadata-aligned hold1/m0/m1/m2/hold2 (boundaries at motion onset and
         # offset, per the MWorks protocol + generation notebook).
-        if variant in ("video", "videoX"):
+        if variant in ("video", "videoX", "videoY"):
             from experiments.sfm import windows as W
-            segs = (list(W.EXP_SEGMENTS) if variant == "videoX"
+            segs = (list(W.EXP2_SEGMENTS) if variant == "videoY"
+                    else list(W.EXP_SEGMENTS) if variant == "videoX"
                     else [f"seg{i}" for i in range(6)])
             if all(worklist.is_done(args.out_root, out_name, sv, sid) for sv in segs):
                 skipped += 1
@@ -213,7 +214,7 @@ def main():
             # then continue forward as in 'static'.
             order = list(segs)
             head_carry = None
-            if mem.handoff == "static_bi":
+            if mem.handoff in ("static_bi", "static_pred"):
                 inits = {}
                 for sv in segs:
                     bp = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
@@ -240,27 +241,39 @@ def main():
                     if mem.is_off():   # degenerate use: independent segments
                         results, out_arrays, traces = infer_window(arrays, mcfg,
                                                                    seed=seed)
-                    elif mem.handoff in ("static", "static_bi"):
-                        # Motion-trust policy: the assess-score guard cannot tell
-                        # good grouping from bad when velocity evidence is weak
-                        # (it accepted static-head garbage into moving segments,
-                        # -0.46 on seg2-3), so adopt the carried state ONLY into
-                        # static-init segments (whose fresh inits are near-chance)
-                        # and only from motion-trusted sources; moving-init
-                        # segments keep their excellent fresh inits.
+                    elif mem.handoff in ("static", "static_bi", "static_pred"):
+                        # Motion-trust policy (static/static_bi): the assess-score
+                        # guard cannot tell good grouping from bad when velocity
+                        # evidence is weak (it accepted static-head garbage into
+                        # moving segments, -0.46 on seg2-3), so adopt the carried
+                        # state ONLY into static-init segments (whose fresh inits
+                        # are near-chance) and only from motion-trusted sources.
+                        # static_pred: offer wherever a carry exists (both
+                        # directions, no trust filter) and let the marginal-data-
+                        # likelihood gate inside infer_window_mem decide adoption
+                        # — the direct test of grouping-aware acceptance.
                         tgt_static = bool(frame_motion[0] < 0.08)
                         backward = (head_carry is not None
                                     and segs.index(sv) < segs.index(order[0]))
                         cin = head_carry if backward else carry
-                        trusted = True if backward else src_trusted
-                        use_carry = bool(cin is not None and trusted
+                        if mem.handoff == "static_pred":
+                            offer = cin is not None
+                            mem_seg = dataclasses.replace(
+                                mem,
+                                handoff="static_pred" if offer else "none")
+                        else:
+                            trusted = True if backward else src_trusted
+                            offer = bool(cin is not None and trusted
                                          and tgt_static)
-                        mem_seg = dataclasses.replace(
-                            mem, handoff="always" if use_carry else "none")
+                            mem_seg = dataclasses.replace(
+                                mem, handoff="always" if offer else "none")
                         results, out_arrays, traces, cout = infer_window_mem(
                             arrays, mcfg, mem_seg, seed=seed,
-                            carry_in=cin if use_carry else None)
-                        results["handoff_used"] = use_carry
+                            carry_in=cin if offer else None)
+                        adopted = (bool(results.get("handoff_used", False))
+                                   if mem.handoff == "static_pred" else offer)
+                        results["handoff_offered"] = bool(offer)
+                        results["handoff_used"] = adopted
                         results["handoff_backward"] = bool(backward)
                         if backward:
                             # chain head rescues backward, nearest-first
@@ -269,9 +282,11 @@ def main():
                         else:
                             carry = cout
                             src_trusted = bool(frame_motion.max() > 0.08) or \
-                                (use_carry and src_trusted)
-                            if (mem.handoff == "static_bi" and sv == order[0]
-                                    and src_trusted):
+                                (adopted and src_trusted)
+                            if (sv == order[0]
+                                    and (mem.handoff == "static_pred"
+                                         or (mem.handoff == "static_bi"
+                                             and src_trusted))):
                                 head_carry = {"state": cout["state0"],
                                               "key": cout["key"]}
                     else:

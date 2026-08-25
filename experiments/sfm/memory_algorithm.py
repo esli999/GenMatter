@@ -126,6 +126,55 @@ def mem_gibbs_sweep(core_carry, aux: MemAux):
             use_weighted_blobs)
 
 
+@jax.jit
+def marginal_data_loglik(genmatter_state):
+    """Assignment-marginalized datapoint log-likelihood: mean over datapoints of
+    logsumexp over the L+1 mixture components (blob likelihood + mixing weight;
+    outlier component included). Pure data fit — no structural priors, no chain
+    history — so unlike the joint it can compare a handed-off state against a
+    fresh one without rewarding prior-typicality or longer chains (the failure
+    mode that sank score-guarded handoff). Chunked like the assignment move."""
+    from genmatter.inference import blob_datapoint_likelihood_model_no_assignment
+    from genjax import ChoiceMapBuilder as C
+
+    hypers = genmatter_state.hypers
+    num_blobs = hypers.n_blobs
+    num_datapoints = hypers.n_datapoints
+    datapoint_positions = genmatter_state.datapoints_state.datapoint_positions
+    datapoint_vels = genmatter_state.datapoints_state.datapoint_vels
+    blobs_state = genmatter_state.blobs_state
+
+    extended_weights = jnp.concatenate([blobs_state.blob_weights,
+                                        jnp.array([hypers.outlier_prob])])
+    log_mixture_weights = jnp.log(extended_weights / jnp.sum(extended_weights))
+
+    def point_marginal(point_idx):
+        chm = (C["datapoint_position"].set(datapoint_positions[point_idx]) |
+               C["datapoint_vel"].set(datapoint_vels[point_idx]))
+        log_liks = jax.vmap(
+            lambda i: blob_datapoint_likelihood_model_no_assignment.assess(
+                chm, (blobs_state[i],))[0]
+        )(jnp.arange(num_blobs))
+        v = datapoint_vels[point_idx]
+        speed = jnp.linalg.norm(v)
+        alpha = hypers.outlier_velocity_gamma_shape
+        beta = hypers.outlier_velocity_gamma_rate
+        log_gamma_vel = ((alpha - 1) * jnp.log(speed + 1e-8) - beta * speed
+                         - alpha * jnp.log(1. / beta) - jax.lax.lgamma(alpha))
+        logits = jnp.concatenate([log_liks, jnp.array([log_gamma_vel])])
+        return jax.scipy.special.logsumexp(logits + log_mixture_weights)
+
+    batch_size = 1024 if num_datapoints % 1024 == 0 else num_datapoints
+
+    def batch_marginals(carry, batch_idx):
+        idx = jnp.arange(batch_size) + batch_idx * batch_size
+        return carry, jax.vmap(point_marginal)(idx)
+
+    _, per_point = jax.lax.scan(batch_marginals, None,
+                                jnp.arange(num_datapoints // batch_size))
+    return jnp.mean(per_point)
+
+
 _MEM_PROGRAM_CACHE = {}
 
 
@@ -255,6 +304,7 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
 
     handoff_used = False
     hand_score = None
+    pred_scores = None
     if carry_in is not None and mem.handoff != "none":
         # carried state -> this window's frame-0 data, then a burn-in phase pair
         hstate = propagate_state(carry_in["state"], points[0], motion[0])
@@ -269,8 +319,17 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
         _, hbest, hscore, hba, hha, hscores, htr = p_track(
             hk2, hbest, GIBBS_DIALS, mcfg.inner_loops, True, haux)
         hand_score = float(hscore)
-        accept = (mem.handoff == "always"
-                  or float(hscore) > float(fresh_score))
+        if mem.handoff == "always":
+            accept = True
+        elif mem.handoff == "static_pred":
+            # accept by pure data fit (assignment-marginalized likelihood), not
+            # the joint — compares best-of-burn-in against best-of-fresh-init
+            h_pred = float(marginal_data_loglik(hbest))
+            f_pred = float(marginal_data_loglik(fresh_best))
+            pred_scores = (h_pred, f_pred)
+            accept = h_pred > f_pred
+        else:
+            accept = float(hscore) > float(fresh_score)
         if accept:
             handoff_used = True
             state, key = hbest, hkey
@@ -303,5 +362,7 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
     results["fresh_score"] = float(fresh_score)
     if hand_score is not None:
         results["handoff_score"] = hand_score
+    if pred_scores is not None:
+        results["handoff_pred"], results["fresh_pred"] = pred_scores
     carry_out = {"state": state, "key": key, "state0": state0}
     return results, arrays_out, traces, carry_out

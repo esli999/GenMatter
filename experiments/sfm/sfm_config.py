@@ -221,6 +221,14 @@ def pilot_config_grid():
     grid.append(v2)
     grid.append(dataclasses.replace(v2, name="sfm_v2_hb5", n_hyperblobs=5))
     grid.append(dataclasses.replace(v2, name="sfm_v2_track300", track_sweeps=300))
+    # rotation-identifiability sweep: sigma_V is the variance of blob velocities
+    # around the hyperblob transform's predicted field. At the inherited 1e15 the
+    # transform is DECOUPLED from the data (its posterior is the prior — per-sweep
+    # rotation samples are diffuse and key-dominated). Tightening it couples blob
+    # velocities to the transform; SFM objects are rigid, so the coupling is
+    # physically right. Blob-velocity magnitudes are ~0.3-0.9 world units/frame.
+    for sv in (1.0, 0.1, 0.01):
+        grid.append(dataclasses.replace(v2, name=f"sfm_v2_sv{sv:g}", sigma_V=sv))
     return {c.name: c for c in grid}
 
 

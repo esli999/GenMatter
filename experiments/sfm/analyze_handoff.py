@@ -39,6 +39,10 @@ def collect(out_root: Path, name: str, segments):
                 v["curve"][frames[fr["frame"]]] = fr["roi_jaccard"]
             if "handoff_used" in d:
                 v["accepted"].append(bool(d["handoff_used"]))
+                # acceptance denominator = windows actually OFFERED a handoff
+                # (older results lack the field: fall back to counting all)
+                v.setdefault("offered", []).append(
+                    bool(d.get("handoff_offered", True)))
     return vids
 
 
@@ -58,16 +62,22 @@ def main():
     ap.add_argument("--out-root", default=str(cfg.RESULTS_DIR / "windows"))
     ap.add_argument("--baseline-config", default="sfm_v2")
     ap.add_argument("--memories", required=True)
-    ap.add_argument("--segset", default="seg", choices=["seg", "exp"])
+    ap.add_argument("--segset", default="seg", choices=["seg", "exp", "exp2"])
     args = ap.parse_args()
     out_root = Path(args.out_root)
     from experiments.sfm import windows as W
-    segments = (list(W.EXP_SEGMENTS) if args.segset == "exp"
+    segments = (list(W.EXP2_SEGMENTS) if args.segset == "exp2"
+                else list(W.EXP_SEGMENTS) if args.segset == "exp"
                 else [f"seg{i}" for i in range(6)])
     base = collect(out_root, args.baseline_config, segments)
     print(f"baseline {args.baseline_config} [{args.segset}]: {len(base)} videos")
 
-    if args.segset == "exp":
+    if args.segset == "exp2":       # full 24/24 coverage
+        EVAL = {"frames 6-23": list(range(6, 24)),
+                "motion (6-17)": list(range(6, 18)),
+                "post-offset hold2 (18-23)": list(range(18, 24)),
+                "static head hold1 (0-5)": list(range(0, 6))}
+    elif args.segset == "exp":
         EVAL = {"frames 6-23": list(range(6, 24)),
                 "motion (6-16)": list(range(6, 17)),
                 "post-offset hold2 (18-22)": [18, 19, 20, 21, 22],
@@ -81,10 +91,13 @@ def main():
     for name in args.memories.split(","):
         mem = collect(out_root, f"{args.baseline_config}+{name}", segments)
         sids = sorted(set(base) & set(mem))
-        acc = [a for s in sids for a in mem[s]["accepted"]]
-        rate = float(np.mean(acc)) if acc else float("nan")
+        pairs = [(a, o) for s in sids
+                 for a, o in zip(mem[s]["accepted"], mem[s].get("offered", []))]
+        n_acc = sum(a for a, _ in pairs)
+        n_off = sum(o for _, o in pairs)
+        rate = n_acc / n_off if n_off else float("nan")
         print(f"\n{name}: n={len(sids)} videos, handoff acceptance={rate:.2f} "
-              f"({sum(acc)}/{len(acc)})")
+              f"({n_acc}/{n_off} offered; {len(pairs)} windows)")
         for lab, fr in EVAL.items():
             m, lo, hi = paired_windows(base, mem, sids, fr)
             print(f"  {lab:26} delta={m:+.3f} [{lo:+.3f},{hi:+.3f}]")

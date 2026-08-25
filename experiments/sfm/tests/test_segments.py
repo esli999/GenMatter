@@ -63,6 +63,23 @@ def test_exp_segments():
     print("exp (metadata-aligned) segments: PASS")
 
 
+def test_exp2_segments():
+    # exp + 1-frame forward overlap: every video frame 0..23 is EVALUATED exactly
+    # once (a window of F frames evaluates frames[:-1]); init frames stay on the
+    # epoch starts (0, 6, 10, 14, 18); the only self-pair is hold2x's terminal pad
+    ev = [f for sv in W.EXP2_SEGMENTS for f in W.window_frames(sv)[:-1]]
+    assert ev == list(range(24)), f"exp2 must evaluate all 24 frames once: {ev}"
+    assert [W.window_frames(sv)[0] for sv in W.EXP2_SEGMENTS] == [0, 6, 10, 14, 18]
+    pairs = [p for sv in W.EXP2_SEGMENTS for p in W.flow_pairs(sv)]
+    assert (23, 23) in pairs and all(b in (a, a + 1) for a, b in pairs)
+    for sv in W.EXP2_SEGMENTS:
+        assert W.default_gated(sv)
+    assert W.mask_indices("hold1x") == (0,) * 6 + (0,)
+    assert W.mask_indices("m2x") == (8, 9, 10, 11, 11)
+    assert W.mask_indices("hold2x") == (11,) * 7
+    print("exp2 (overlap, 24/24 coverage) segments: PASS")
+
+
 def test_gating_defaults():
     assert all(W.default_gated(f"seg{i}") for i in range(6))
     assert W.default_gated("tiledA_g") and not W.default_gated("tiledA")
@@ -101,6 +118,7 @@ if __name__ == "__main__":
     import tempfile
     test_segment_layout()
     test_exp_segments()
+    test_exp2_segments()
     test_mask_index_clamp()
     test_gating_defaults()
     with tempfile.TemporaryDirectory() as d:
