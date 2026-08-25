@@ -17,17 +17,30 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.sfm import sfm_config as cfg
+from experiments.sfm import windows as W
 from genmatter.bootstrap_stats import bootstrap_mean_ci_95
 
 N_FRAMES = cfg.N_FRAMES
 
+SEGSETS = {
+    # blind 4-frame tiles (phase-2 first pass)
+    "seg": {"segments": [f"seg{i}" for i in range(6)],
+            "moving": ["seg1", "seg2", "seg3", "seg4"],
+            "static": ["seg0", "seg5"]},
+    # metadata-aligned: boundaries at motion onset (frame 6) and offset (frame 18)
+    "exp": {"segments": list(W.EXP_SEGMENTS),
+            "moving": ["m0", "m1", "m2"],
+            "static": ["hold1", "hold2"]},
+}
 
-def collect(out_root: Path, config: str):
-    """{stim_id: {"texture":…, "curve": [24 floats/nan], "seg_mean": {segK: jacc}}}"""
+
+def collect(out_root: Path, config: str, segments):
+    """{stim_id: {"texture":…, "curve": [24 floats/nan], "seg_mean": {seg: jacc}}}"""
     vids = {}
     n_err = 0
-    for k in range(6):
-        for rj in sorted((out_root / config / f"seg{k}").glob("*/results.json")):
+    for sv in segments:
+        frames = W.window_frames(sv)
+        for rj in sorted((out_root / config / sv).glob("*/results.json")):
             d = json.loads(rj.read_text())
             if d.get("error"):
                 n_err += 1
@@ -42,10 +55,10 @@ def collect(out_root: Path, config: str):
                 "seg_mean": {},
             })
             for fr in d["frames"]:
-                g = 4 * k + fr["frame"]
+                g = frames[fr["frame"]]
                 v["curve"][g] = fr["roi_jaccard"]
                 v["oracle_curve"][g] = fr["oracle_jaccard"]
-            v["seg_mean"][f"seg{k}"] = d["mean_roi_jaccard"]
+            v["seg_mean"][sv] = d["mean_roi_jaccard"]
     if n_err:
         print(f"note: {n_err} error windows excluded")
     return vids
@@ -84,32 +97,33 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-root", default=str(cfg.RESULTS_DIR / "windows"))
     ap.add_argument("--config", default="sfm_v2")
+    ap.add_argument("--segset", default="seg", choices=sorted(SEGSETS))
     args = ap.parse_args()
+    ss = SEGSETS[args.segset]
 
-    vids = collect(Path(args.out_root), args.config)
-    print(f"{args.config}: {len(vids)} videos with segment results")
+    vids = collect(Path(args.out_root), args.config, ss["segments"])
+    print(f"{args.config} [{args.segset}]: {len(vids)} videos with segment results")
     if not vids:
         return
-    moving = [f"seg{k}" for k in (1, 2, 3, 4)]
-    static = ["seg0", "seg5"]
-    out = {"config": args.config, "n_videos": len(vids),
-           "headline_moving_seg1_4": {}, "static_seg0_5": {},
-           "curves_by_texture": {}}
+    out = {"config": args.config, "segset": args.segset, "n_videos": len(vids),
+           "headline_moving": {}, "static_holds": {}, "curves_by_texture": {}}
     for tex in ("ALL",) + cfg.TEXTURES:
         pred = (lambda v: True) if tex == "ALL" else (lambda v, t=tex: v["texture"] == t)
-        out["headline_moving_seg1_4"][tex] = headline(vids, pred, moving)
-        out["static_seg0_5"][tex] = headline(vids, pred, static)
+        out["headline_moving"][tex] = headline(vids, pred, ss["moving"])
+        out["static_holds"][tex] = headline(vids, pred, ss["static"])
         out["curves_by_texture"][tex] = mean_curves(vids, pred)
-    agg = cfg.assert_writable_path(cfg.RESULTS_DIR / "aggregated" /
-                                   f"video_{args.config.replace('+','_')}.json")
+    suffix = "" if args.segset == "seg" else f"_{args.segset}"
+    agg = cfg.assert_writable_path(
+        cfg.RESULTS_DIR / "aggregated" /
+        f"video_{args.config.replace('+','_')}{suffix}.json")
     agg.parent.mkdir(parents=True, exist_ok=True)
     agg.write_text(json.dumps(out, indent=1))
     for tex in ("ALL",) + cfg.TEXTURES:
-        h, s = out["headline_moving_seg1_4"][tex], out["static_seg0_5"][tex]
+        h, s = out["headline_moving"][tex], out["static_holds"][tex]
         if h:
-            print(f"{tex:>12}: moving(seg1-4) jacc={h['jaccard']:.3f} "
+            print(f"{tex:>12}: moving jacc={h['jaccard']:.3f} "
                   f"[{h['ci'][0]:.3f},{h['ci'][1]:.3f}] n={h['n']}   "
-                  f"static(seg0/5) jacc={s['jaccard']:.3f}" if s else "")
+                  f"static jacc={s['jaccard']:.3f}" if s else "")
     print(f"wrote {agg}")
 
 

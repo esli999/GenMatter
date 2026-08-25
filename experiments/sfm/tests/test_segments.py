@@ -46,6 +46,23 @@ def test_mask_index_clamp():
     print("mask-index clamping: PASS")
 
 
+def test_exp_segments():
+    # metadata-aligned: boundaries exactly at motion onset (6) and offset (18)
+    frames = [f for sv in W.EXP_SEGMENTS for f in W.window_frames(sv)]
+    assert frames == list(range(24)), "exp segments must tile all 24 frames"
+    assert W.window_frames("hold1") == (0, 1, 2, 3, 4, 5)
+    assert W.window_frames("m0")[0] == 6 and W.window_frames("m2")[-1] == 17
+    assert W.window_frames("hold2") == (18, 19, 20, 21, 22, 23)
+    for sv in W.EXP_SEGMENTS:
+        assert all(b == a + 1 for a, b in W.flow_pairs(sv))
+        assert W.default_gated(sv)
+    assert W.mask_indices("hold1") == (0,) * 6
+    assert W.mask_indices("m0") == (0, 1, 2, 3)
+    assert W.mask_indices("m2") == (8, 9, 10, 11)
+    assert W.mask_indices("hold2") == (11,) * 6
+    print("exp (metadata-aligned) segments: PASS")
+
+
 def test_gating_defaults():
     assert all(W.default_gated(f"seg{i}") for i in range(6))
     assert W.default_gated("tiledA_g") and not W.default_gated("tiledA")
@@ -83,6 +100,7 @@ def test_generic_t_validation(tmp_root):
 if __name__ == "__main__":
     import tempfile
     test_segment_layout()
+    test_exp_segments()
     test_mask_index_clamp()
     test_gating_defaults()
     with tempfile.TemporaryDirectory() as d:

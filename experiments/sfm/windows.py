@@ -13,12 +13,26 @@ static holds — reported separately, kept for ephys-aligned model output).
 
 SEGMENT_VARIANTS = {f"seg{i}": tuple(range(4 * i, 4 * i + 4)) for i in range(6)}
 
+# Metadata-aligned segmentation: the MWorks protocol presents each clip once for
+# 400 ms; the generation notebook assembles 100 ms static -> 200 ms motion ->
+# 100 ms static at 60 fps, so the EXPERIMENT's divisions are motion onset (frame 6)
+# and offset (frame 18). These segments never straddle either event: motion windows
+# are pure motion, and onset/offset are between-segment transitions.
+EXP_SEGMENTS = {
+    "hold1": (0, 1, 2, 3, 4, 5),
+    "m0":    (6, 7, 8, 9),
+    "m1":    (10, 11, 12, 13),
+    "m2":    (14, 15, 16, 17),
+    "hold2": (18, 19, 20, 21, 22, 23),
+}
+
 WINDOW_VARIANTS = {
     "tiledA":   (6, 7, 8, 9, 10, 11),
     "tiledB":   (12, 13, 14, 15, 16, 17),
     "centered": (9, 10, 11, 12, 13, 14),
     "stride2":  (6, 8, 10, 12, 14, 16),
     **SEGMENT_VARIANTS,
+    **EXP_SEGMENTS,
 }
 
 PILOT_VARIANTS = ("tiledA", "tiledB", "centered", "stride2")
@@ -36,7 +50,8 @@ def is_gated(variant: str) -> bool:
 def default_gated(variant: str) -> bool:
     """Segments are always evidence-gated (a no-op on textured stimuli); phase-1
     variants opt in via the '_g' suffix so gated/ungated A-B results stay distinct."""
-    return is_gated(variant) or base_variant(variant) in SEGMENT_VARIANTS
+    return (is_gated(variant) or base_variant(variant) in SEGMENT_VARIANTS
+            or base_variant(variant) in EXP_SEGMENTS)
 
 
 def window_frames(variant: str):

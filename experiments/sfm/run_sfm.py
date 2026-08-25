@@ -149,6 +149,7 @@ def main():
 
     if args.batch_windows > 1:
         from experiments.sfm.batched import infer_windows_batched
+        from experiments.sfm import windows as W
         pending = []
         for sid, variant in rows:
             if worklist.is_done(args.out_root, out_name, variant, sid):
@@ -159,9 +160,21 @@ def main():
                 print(f"MISSING bundle {bpath} — skipping", flush=True)
                 continue
             pending.append((sid, variant, bpath))
+        # windows of different lengths cannot stack: group chunks by T
+        # (stable sort keeps the claim order within each T group)
+        pending.sort(key=lambda r: len(W.window_frames(r[1])))
         B = args.batch_windows
-        for c0 in range(0, len(pending), B):
-            chunk = pending[c0:c0 + B]
+        chunks = []
+        i = 0
+        while i < len(pending):
+            T0 = len(W.window_frames(pending[i][1]))
+            j = i
+            while j < len(pending) and j - i < B and \
+                    len(W.window_frames(pending[j][1])) == T0:
+                j += 1
+            chunks.append(pending[i:j])
+            i = j
+        for chunk in chunks:
             loaded = [bundles.load_bundle(p) for _, _, p in chunk]
             t0 = time.time()
             entries = infer_windows_batched([a for a, _ in loaded], mcfg,
@@ -179,13 +192,18 @@ def main():
               f"total {time.time()-t_start:.0f}s", flush=True)
         return
 
-    segs = [f"seg{i}" for i in range(6)]
     for sid, variant in rows:
-        # A manifest row (sid, "video") = the six segments run IN ORDER with the
-        # memory carry handed across segment boundaries (mem.handoff decides
-        # whether/how the carried state is adopted). One row per video keeps a
-        # video's segments in one worker by construction.
-        if variant == "video":
+        # A manifest row (sid, "video"/"videoX") = that video's segments run IN
+        # ORDER with the memory carry handed across segment boundaries
+        # (mem.handoff decides whether/how the carried state is adopted). One row
+        # per video keeps a video's segments in one worker by construction.
+        # "video" = the blind 4-frame tiles seg0..seg5; "videoX" = the
+        # metadata-aligned hold1/m0/m1/m2/hold2 (boundaries at motion onset and
+        # offset, per the MWorks protocol + generation notebook).
+        if variant in ("video", "videoX"):
+            from experiments.sfm import windows as W
+            segs = (list(W.EXP_SEGMENTS) if variant == "videoX"
+                    else [f"seg{i}" for i in range(6)])
             if all(worklist.is_done(args.out_root, out_name, sv, sid) for sv in segs):
                 skipped += 1
                 continue
