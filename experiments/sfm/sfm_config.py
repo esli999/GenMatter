@@ -56,6 +56,22 @@ N_FRAMES = 24
 MOVING_FRAMES = tuple(range(6, 18))   # video frames 6..17 hold render frames init..init+11
 N_MOVING = 12
 
+# Presentation protocol, verified against stimuli/SFM.parafoveal.videos_2.csv, the
+# MWorks .mwel rig protocol, the generation notebook, and the lab's paper
+# (biorxiv 10.64898/2026.05.13.724755): each video autoplays ONCE for 400 ms
+# (100 ms static hold -> 200 ms rotation -> 100 ms static hold at 60 fps);
+# 7 viewpoints evenly spaced on a 90-frame orbit => 4 deg/frame, 48 deg arc per
+# clip, non-overlapping; the paper's primary neural analysis window is
+# 100-300 ms = the motion epoch = video frames 6..17.
+PROTOCOL = {
+    "duration_ms": 400, "fps": 60,
+    "static_hold_ms": 100, "motion_ms": 200,
+    "motion_onset_frame": 6, "motion_offset_frame": 18,
+    "rotation_deg_per_frame": 4.0, "orbit_frames": 90,
+    "neural_analysis_window_ms": (100, 300),
+    "stim_on_delay_ms": 150, "iti_ms": (500, 1000),
+}
+
 # Model grid: round32(max(H,W)//8) at native 1024 -> 128
 GRID_HW = 128
 N_DATAPOINTS = GRID_HW * GRID_HW      # 16384 (divisible by the 1024 logprob chunk)

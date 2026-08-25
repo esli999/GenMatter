@@ -11,6 +11,9 @@ tile the WHOLE 24-frame video as six consecutive 4-frame segments (seg0/seg5 are
 static holds — reported separately, kept for ephys-aligned model output).
 """
 
+# LEGACY blind 4-frame tiles (first phase-2 pass): cuts at 4/8/12/16/20 straddle
+# motion onset (6) and offset (18) — kept only to read existing results. New work
+# should use EXP_SEGMENTS below.
 SEGMENT_VARIANTS = {f"seg{i}": tuple(range(4 * i, 4 * i + 4)) for i in range(6)}
 
 # Metadata-aligned segmentation: the MWorks protocol presents each clip once for

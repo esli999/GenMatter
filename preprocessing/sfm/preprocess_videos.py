@@ -209,8 +209,12 @@ def main():
     ap.add_argument("--save-raw", action="store_true")
     args = ap.parse_args()
 
-    variants = (sorted(W.SEGMENT_VARIANTS) if args.variants == "segments"
-                else args.variants.split(","))
+    if args.variants == "exp":            # metadata-aligned (preferred)
+        variants = list(W.EXP_SEGMENTS)
+    elif args.variants == "segments":     # legacy blind tiles
+        variants = sorted(W.SEGMENT_VARIANTS)
+    else:
+        variants = args.variants.split(",")
     model_cfg = cfg.CONFIGS.get(args.config) or cfg.pilot_config_grid()[args.config]
 
     if args.stim_file:

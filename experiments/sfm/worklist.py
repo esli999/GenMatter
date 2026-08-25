@@ -59,7 +59,9 @@ def main():
 
     if args.variants == "all":
         variants = list(W.PILOT_VARIANTS)
-    elif args.variants == "segments":
+    elif args.variants == "exp":          # metadata-aligned (preferred)
+        variants = list(W.EXP_SEGMENTS)
+    elif args.variants == "segments":     # legacy blind tiles
         variants = sorted(W.SEGMENT_VARIANTS)
     else:
         variants = args.variants.split(",")
