@@ -46,6 +46,15 @@ EXP2_SEGMENTS = {
     "hold2x": (18, 19, 20, 21, 22, 23, 23),
 }
 
+# THE final design (user directive): one continuous tracking chain over exactly
+# the motion epoch — init at frame 6 (the first of the 12 unique rotation poses,
+# with real motion evidence from pair 6->7), track to the offset at frame 18.
+# 13 window frames -> 12 timesteps -> outputs for precisely the 12 unique poses
+# (frames 6..17) = the paper's 100-300 ms neural analysis window. The static
+# holds are not modeled: they carry no motion, and in the textured conditions
+# the object is invisible there (uniform texture) — nothing causal can group it.
+MOTION_FULL = {"mfull": tuple(range(6, 19))}
+
 WINDOW_VARIANTS = {
     "tiledA":   (6, 7, 8, 9, 10, 11),
     "tiledB":   (12, 13, 14, 15, 16, 17),
@@ -54,6 +63,7 @@ WINDOW_VARIANTS = {
     **SEGMENT_VARIANTS,
     **EXP_SEGMENTS,
     **EXP2_SEGMENTS,
+    **MOTION_FULL,
 }
 
 PILOT_VARIANTS = ("tiledA", "tiledB", "centered", "stride2")
@@ -73,7 +83,8 @@ def default_gated(variant: str) -> bool:
     variants opt in via the '_g' suffix so gated/ungated A-B results stay distinct."""
     return (is_gated(variant) or base_variant(variant) in SEGMENT_VARIANTS
             or base_variant(variant) in EXP_SEGMENTS
-            or base_variant(variant) in EXP2_SEGMENTS)
+            or base_variant(variant) in EXP2_SEGMENTS
+            or base_variant(variant) in MOTION_FULL)
 
 
 def window_frames(variant: str):

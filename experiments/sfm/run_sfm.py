@@ -148,6 +148,9 @@ def main():
         done += 1
 
     if args.batch_windows > 1:
+        if mem.smooth_passes > 1 or mem.n_particles > 1:
+            raise SystemExit("smoother/SMC configs run unbatched: window batching "
+                             "and particle batching share the same vmap budget")
         from experiments.sfm.batched import infer_windows_batched
         from experiments.sfm import windows as W
         pending = []
@@ -314,6 +317,10 @@ def main():
         try:
             if mem.is_off():
                 results, out_arrays, traces = infer_window(arrays, mcfg, seed=seed)
+            elif mem.n_particles > 1:
+                from experiments.sfm.smc import infer_window_smc
+                results, out_arrays, traces = infer_window_smc(
+                    arrays, mcfg, mem, seed=seed)
             else:
                 results, out_arrays, traces, _ = infer_window_mem(
                     arrays, mcfg, mem, seed=seed)

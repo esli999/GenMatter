@@ -35,6 +35,9 @@ SEGSETS = {
     "exp2": {"segments": list(W.EXP2_SEGMENTS),
              "moving": ["m0x", "m1x", "m2x"],
              "static": ["hold1x", "hold2x"]},
+    # THE final design: one continuous chain over the motion epoch (frames 6-18,
+    # outputs for the 12 unique poses 6..17); the static holds are not modeled
+    "mfull": {"segments": ["mfull"], "moving": ["mfull"], "static": []},
 }
 
 
@@ -125,9 +128,9 @@ def main():
     for tex in ("ALL",) + cfg.TEXTURES:
         h, s = out["headline_moving"][tex], out["static_holds"][tex]
         if h:
+            stat = f"   static jacc={s['jaccard']:.3f}" if s else ""
             print(f"{tex:>12}: moving jacc={h['jaccard']:.3f} "
-                  f"[{h['ci'][0]:.3f},{h['ci'][1]:.3f}] n={h['n']}   "
-                  f"static jacc={s['jaccard']:.3f}" if s else "")
+                  f"[{h['ci'][0]:.3f},{h['ci'][1]:.3f}] n={h['n']}{stat}")
     print(f"wrote {agg}")
 
 

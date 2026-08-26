@@ -129,6 +129,31 @@ def main():
     assert good > bad, f"marginal loglik did not prefer the fit state ({good} <= {bad})"
     print(f"marginal data loglik ranks fit > corrupted: PASS ({good:.2f} > {bad:.2f})")
 
+    # --- 7. Smoother back-transform inverts propagation exactly (blob means)
+    from experiments.sfm.memory_algorithm import back_transform
+    st3 = propagate_state(last_b, points[1], motion[1])
+    back_means, _ = back_transform(st3)
+    assert np.allclose(np.asarray(back_means),
+                       np.asarray(last_b.blobs_state.blob_means), atol=1e-4), \
+        "back_transform did not invert propagate_state"
+    print("smoother back-transform inversion: PASS")
+
+    # --- 8. SMC host helpers: systematic resampling targets the weights;
+    # lineage walk reconstructs a coherent path through resamplings
+    from experiments.sfm.smc import _systematic_resample
+    rng = np.random.default_rng(0)
+    logw = np.log(np.array([0.7, 0.1, 0.1, 0.1]))
+    idx = np.concatenate([_systematic_resample(logw, rng) for _ in range(200)])
+    frac = float(np.mean(idx == 0))
+    assert 0.6 < frac < 0.8, f"systematic resampling off-target ({frac:.2f} != ~0.7)"
+    ancestry = [np.arange(4), np.array([0, 0, 3, 3]), np.arange(4)]
+    lin, i = [0] * 3, 2
+    for f in range(2, -1, -1):
+        lin[f] = i
+        i = int(ancestry[f][i])
+    assert lin == [3, 2, 2], f"lineage walk wrong: {lin}"
+    print("SMC resampling + lineage: PASS")
+
     print("test_memory: PASS")
 
 

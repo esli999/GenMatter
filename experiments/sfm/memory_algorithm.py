@@ -249,11 +249,16 @@ def _mem_programs(mcfg):
 
 
 def _run_frames(state, key, points, motion, mcfg, mem, base, per_frame,
-                dev_traces, frame_offset, G, p_vel, p_track, frame_evidence):
-    """Track frames 1..T-1 of one window from an accepted frame-0 state."""
+                dev_traces, frame_offset, G, p_vel, p_track, frame_evidence,
+                keep_states=None, prior_override=None):
+    """Track frames 1..T-1 of one window from an accepted frame-0 state.
+    keep_states: list to append each frame's accepted state to (smoother pass 1).
+    prior_override(f, aux): hook returning a modified aux (smoother pass 2)."""
     for f in range(1, points.shape[0]):
         state = propagate_state(state, points[f], motion[f])
         aux = frame_aux(state, mem, base, vel_evidence=frame_evidence[f])
+        if prior_override is not None:
+            aux = prior_override(f, aux)
         key, k1, k2 = jax.random.split(key, 3)
         _, best, _, _, _, _, tr_v = p_vel(k1, state, VELOCITY_UPDATE_DIALS,
                                           mcfg.inner_loops, True, aux)
@@ -266,7 +271,25 @@ def _run_frames(state, key, points, motion, mcfg, mem, base, per_frame,
         dev_traces[f"f{g}_vel"] = tr_v
         dev_traces[f"f{g}_track"] = tr
         per_frame.append(_frame_summary(state, ba, ha, scores, mcfg, G))
+        if keep_states is not None:
+            keep_states.append(state)
     return state, key
+
+
+@jax.jit
+def back_transform(state):
+    """A state's blob means / velocity means mapped one frame BACK through the
+    inverse of its own rigid transforms (orthogonal R => transpose). Forward is
+    m' = muH + t + R(m - muH) with muH' = muH + t, so the inverse from the
+    post-state's own quantities is m = (muH' - t) + R^T (m' - muH')."""
+    a = state.blobs_state.hyperblob_assignments
+    R = state.hyperblobs_state.hyperblob_rot_vels[a]
+    t = state.hyperblobs_state.hyperblob_trans_vels[a]
+    muH = state.hyperblobs_state.hyperblob_means[a]
+    means = state.blobs_state.blob_means
+    back_means = (muH - t) + jnp.einsum("lji,lj->li", R, means - muH)
+    back_vels = jnp.einsum("lji,lj->li", R, state.blobs_state.blob_vel_means)
+    return back_means, back_vels
 
 
 def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
@@ -345,9 +368,53 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
 
     base = base_aux(state, kappa=mem.kappa, kappa_sel=mem.kappa_sel_resolved())
     frame_evidence = np.clip(valid.mean(axis=1) / mem.vel_evidence_floor, 0.0, 1.0)
+    states_p1 = [state] if mem.smooth_passes > 1 else None
     state, key = _run_frames(state, key, points, motion, mcfg, mem, base,
                              per_frame, dev_traces, 0, G, p_vel, p_track,
-                             frame_evidence)
+                             frame_evidence, keep_states=states_p1)
+
+    if mem.smooth_passes > 1:
+        # ---- pass 2 (forward-backward smoother): rerun forward, with the mean
+        # priors blending pass-1's frame t and the BACK-TRANSFORMED pass-1 frame
+        # t+1, and the sticky anchor set to pass-1's own frame-t assignments.
+        # Requires filter_lambda > 0 (the mean priors ride the filtering path).
+        # Frame 0 restarts from pass-1's frame-0 state (no k-means) with
+        # frame-1-informed priors — the smoother's win must show at the chain
+        # head, which a pure forward pass can never revisit.
+        T = points.shape[0]
+        backs = [None] + [back_transform(s) for s in states_p1[1:]]
+
+        def blend(t):
+            m_t = states_p1[t].blobs_state.blob_means
+            v_t = states_p1[t].blobs_state.blob_vel_means
+            if t + 1 < T:
+                bm, bv = backs[t + 1]
+                return 0.5 * (m_t + bm), 0.5 * (v_t + bv)
+            return m_t, v_t
+
+        def override(f, aux):
+            mu0, vel0 = blend(f)
+            return aux._replace(
+                mu_mu0=mu0, vel_mu0=vel0,
+                prev_assign=states_p1[f].datapoints_state
+                            .blob_assignments.astype(jnp.int32))
+
+        per_frame = []
+        dev_traces = {"f0_init": dev_traces["f0_init"]}
+        st = states_p1[0]
+        aux0f = override(0, frame_aux(st, mem, base,
+                                      vel_evidence=frame_evidence[0]))
+        key, k1, k2 = jax.random.split(key, 3)
+        _, st, _, _, _, _, _ = p_vel(k1, st, VELOCITY_UPDATE_DIALS,
+                                     mcfg.inner_loops, True, aux0f)
+        _, st, _, ba, ha, scores, tr = p_track(k2, st, GIBBS_DIALS,
+                                               mcfg.inner_loops, True, aux0f)
+        dev_traces["f0_p2"] = tr
+        per_frame.append(_frame_summary(st, ba, ha, scores, mcfg, G))
+        state0 = st
+        state, key = _run_frames(st, key, points, motion, mcfg, mem, base,
+                                 per_frame, dev_traces, 0, G, p_vel, p_track,
+                                 frame_evidence, prior_override=override)
 
     jax.block_until_ready(state.datapoints_state.blob_assignments)
     t_infer = time.time() - t_start

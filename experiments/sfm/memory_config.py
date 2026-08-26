@@ -113,4 +113,16 @@ def memory_config_grid():
                                  filter_lambda=0.7, adaptive_vel=True,
                                  vel_gate_binary=True, handoff="static_pred",
                                  freeze_kappa=kf))
+    # long-horizon (mfull, 12 transitions) escalation rungs: forward-backward
+    # smoother (needs filter_lambda > 0 — the smoothing priors ride the
+    # filtering path) and SMC (n_particles > 1, vmapped chains, systematic
+    # resampling on assignment-marginalized predictive weights)
+    for lam in (0.5, 0.7):
+        grid.append(MemoryConfig(name=f"filt{lam:g}b_sm2", filter_lambda=lam,
+                                 adaptive_vel=True, vel_gate_binary=True,
+                                 smooth_passes=2))
+    for P in (4, 8, 16):
+        grid.append(MemoryConfig(name=f"filt0.7b_smc{P}", filter_lambda=0.7,
+                                 adaptive_vel=True, vel_gate_binary=True,
+                                 n_particles=P))
     return {m.name: m for m in grid}
