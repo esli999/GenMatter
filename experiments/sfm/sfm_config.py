@@ -26,12 +26,13 @@ SCRATCH_ROOT = Path(os.environ.get("SFM_SCRATCH_ROOT", "/orcd/scratch/bcs/001/es
 RESULTS_DIR = WORK_ROOT / "results"
 BUNDLES_DIR = SCRATCH_ROOT / "bundles"
 # Durable archive of the FINAL (mfull) experiment: the self-contained release
-# folder (inputs/ = depth/flow/points/motion bundles, windows/ = outputs +
-# latent traces, README.md = full documentation). Scratch bundles are
-# regenerable and PURGEABLE, so bundle READS resolve the release archive first
-# and fall back to scratch; preprocessing still WRITES new bundles to scratch.
+# folder (inputs/ = depth/flow/points/motion bundles, flat <sid>.npz;
+# outputs/{baseline,coupling,full_model}/ = results + latent traces;
+# README.md = full documentation). Scratch bundles are regenerable and
+# PURGEABLE, so mfull bundle READS resolve the release archive first and fall
+# back to scratch; preprocessing still WRITES new bundles to scratch.
 RELEASE_DIR = Path(os.environ.get("SFM_RELEASE_DIR", str(WORK_ROOT / "release_mfull")))
-BUNDLE_READ_DIRS = (RELEASE_DIR / "inputs", BUNDLES_DIR)
+RELEASE_INPUTS_DIR = RELEASE_DIR / "inputs"
 MASKS_DIR = SCRATCH_ROOT / "masks"
 DEPTH_CACHE_DIR = SCRATCH_ROOT / "depth_cache"
 JAX_CACHE_DIR = WORK_ROOT / "GenMatter" / ".jax_cache"

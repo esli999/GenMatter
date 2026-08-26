@@ -18,14 +18,15 @@ def bundle_path(bundles_dir, stim_id: int, variant: str) -> Path:
 
 
 def find_bundle(stim_id: int, variant: str) -> Path:
-    """Resolve a bundle for READING: the durable release archive first, then
-    scratch. Returns the last candidate (for the caller's error message) when
-    none exists."""
-    for root in cfg.BUNDLE_READ_DIRS:
-        p = bundle_path(root, stim_id, variant)
+    """Resolve a bundle for READING. The final (mfull) experiment's bundles
+    live FLAT in the durable release archive (inputs/<sid>.npz); every other
+    variant is on scratch. Returns the scratch candidate (for the caller's
+    error message) when nothing exists."""
+    if variant == "mfull":
+        p = cfg.RELEASE_INPUTS_DIR / f"{stim_id:04d}.npz"
         if p.exists():
             return p
-    return p
+    return bundle_path(cfg.BUNDLES_DIR, stim_id, variant)
 
 
 def save_bundle(path, *, points_3d, motion_3d, motion_valid, depth_sq, flow_sq,
