@@ -125,4 +125,11 @@ def memory_config_grid():
         grid.append(MemoryConfig(name=f"filt0.7b_smc{P}", filter_lambda=0.7,
                                  adaptive_vel=True, vel_gate_binary=True,
                                  n_particles=P))
+    # pure mechanisms for the sv0.01-coupled chain (velocity filtering is
+    # superseded there — the transform prior regularizes velocities): freeze
+    # targets the zero-evidence cessation frame; SMC adds hypothesis diversity
+    for kf in (20.0, 100.0):
+        grid.append(MemoryConfig(name=f"frz{kf:g}", freeze_kappa=kf))
+    for P in (8, 16):
+        grid.append(MemoryConfig(name=f"smc{P}", n_particles=P))
     return {m.name: m for m in grid}

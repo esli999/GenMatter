@@ -30,7 +30,9 @@ def rot_angle_deg(R):
 
 
 def object_hyperblob(dd, gt_flat):
-    last_track = sorted(p.split(".")[0] for p in dd.files if "track" in p)[-1]
+    # numeric sort: string order puts f9_track after f12_track
+    last_track = max((p.split(".")[0] for p in dd.files if "track" in p),
+                     key=lambda p: int(p.split("_")[0][1:]))
     da = dd[f"{last_track}.datapoint_assignments"][-1].astype(np.int64)
     ha = dd[f"{last_track}.blob_hyperblob_assignments"][-1].astype(np.int64)
     L = ha.shape[0]
@@ -48,8 +50,11 @@ def main():
     ap.add_argument("--out-root", default=str(cfg.RESULTS_DIR / "windows"))
     ap.add_argument("--configs", required=True)
     ap.add_argument("--variant", default="m1x")
+    ap.add_argument("--json-out", default=None,
+                    help="optional path for machine-readable per-config stats")
     args = ap.parse_args()
     out_root = Path(args.out_root)
+    json_rows = {}
 
     frames = W.window_frames(args.variant)
     gt_frame = W.frame_to_mask_index(frames[-2])
@@ -81,6 +86,13 @@ def main():
               f"(true {TRUE_DEG:g})  mean|err|={np.mean(errs):.2f}  "
               f"frac within 2 deg={np.mean(np.array(errs) < 2.0):.2f}  "
               f"mean Jaccard={np.mean(jaccs):.3f}")
+        json_rows[config] = {
+            "n": len(meds), "median_rot_deg": float(np.median(meds)),
+            "true_deg": float(TRUE_DEG), "mean_abs_err": float(np.mean(errs)),
+            "frac_within_2deg": float(np.mean(np.array(errs) < 2.0)),
+            "mean_jaccard": float(np.mean(jaccs))}
+    if args.json_out:
+        Path(args.json_out).write_text(json.dumps(json_rows, indent=1))
 
 
 if __name__ == "__main__":
