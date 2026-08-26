@@ -353,7 +353,16 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
     t_infer = time.time() - t_start
     traces = jax.device_get(dev_traces) if emit else {}
 
-    results, arrays_out = _evaluate(per_frame, gt_masks, combined, mcfg,
+    # Cluster-identity carry (evaluation only, the chain is untouched): the
+    # frame-0 cluster selection is referenced to the flow-ROI heuristic, which is
+    # garbage in a zero-flow static hold — the carried grouping held the object
+    # (oracle 0.55-0.95) while the REPORTED cluster was wrong (J~0). When a
+    # handoff is adopted, reference selection to the source window's predicted
+    # mask instead: the grouping and its identity cross the boundary together.
+    eval_ref = combined
+    if handoff_used and carry_in is not None and carry_in.get("roi_mask") is not None:
+        eval_ref = np.asarray(carry_in["roi_mask"], bool)
+    results, arrays_out = _evaluate(per_frame, gt_masks, eval_ref, mcfg,
                                     t_infer, seed)
     results["roi_fallback"] = roi_fallback
     results["memory"] = mem.name
@@ -364,5 +373,12 @@ def infer_window_mem(arrays: dict, mcfg: cfg.SfmModelConfig, mem: MemoryConfig,
         results["handoff_score"] = hand_score
     if pred_scores is not None:
         results["handoff_pred"], results["fresh_pred"] = pred_scores
-    carry_out = {"state": state, "key": key, "state0": state0}
+    pm = arrays_out["pixel_hyperblob_assignments"]
+    rid = arrays_out["roi_hyperblob_ids"]
+    carry_out = {"state": state, "key": key, "state0": state0,
+                 # cluster identity for the next window's selection reference:
+                 # forward handoffs use the last frame's mask, backward (state0)
+                 # handoffs the first frame's
+                 "roi_mask": pm[-1].ravel() == rid[-1],
+                 "roi_mask_first": pm[0].ravel() == rid[0]}
     return results, arrays_out, traces, carry_out

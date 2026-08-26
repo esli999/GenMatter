@@ -278,7 +278,8 @@ def main():
                         if backward:
                             # chain head rescues backward, nearest-first
                             head_carry = {"state": cout["state0"],
-                                          "key": cout["key"]}
+                                          "key": cout["key"],
+                                          "roi_mask": cout["roi_mask_first"]}
                         else:
                             carry = cout
                             src_trusted = bool(frame_motion.max() > 0.08) or \
@@ -288,7 +289,8 @@ def main():
                                          or (mem.handoff == "static_bi"
                                              and src_trusted))):
                                 head_carry = {"state": cout["state0"],
-                                              "key": cout["key"]}
+                                              "key": cout["key"],
+                                              "roi_mask": cout["roi_mask_first"]}
                     else:
                         results, out_arrays, traces, carry = infer_window_mem(
                             arrays, mcfg, mem, seed=seed, carry_in=carry)
