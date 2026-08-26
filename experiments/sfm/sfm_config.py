@@ -239,6 +239,11 @@ def pilot_config_grid():
     # (is the optimum a plateau or a knife-edge?)
     for sv in (1.0, 0.1, 0.01, 0.001):
         grid.append(dataclasses.replace(v2, name=f"sfm_v2_sv{sv:g}", sigma_V=sv))
+    # THE final model: sfm_v2 + the velocity-transform coupling. Run with
+    # --memory frz100 (evidence-conditioned assignment freeze) for the full
+    # production configuration; identical parameters to sfm_v2_sv0.01, under
+    # its canonical name.
+    grid.append(dataclasses.replace(v2, name="sfm_v3", sigma_V=0.01))
     return {c.name: c for c in grid}
 
 
