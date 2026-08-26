@@ -17,6 +17,17 @@ def bundle_path(bundles_dir, stim_id: int, variant: str) -> Path:
     return Path(bundles_dir) / variant / f"{stim_id:04d}.npz"
 
 
+def find_bundle(stim_id: int, variant: str) -> Path:
+    """Resolve a bundle for READING: the durable release archive first, then
+    scratch. Returns the last candidate (for the caller's error message) when
+    none exists."""
+    for root in cfg.BUNDLE_READ_DIRS:
+        p = bundle_path(root, stim_id, variant)
+        if p.exists():
+            return p
+    return p
+
+
 def save_bundle(path, *, points_3d, motion_3d, motion_valid, depth_sq, flow_sq,
                 gt_masks, meta: dict):
     path = cfg.assert_writable_path(path)

@@ -93,7 +93,7 @@ def main():
             continue
         key = (stim, variant)
         if key not in cache:
-            bp = B.bundle_path(cfg.BUNDLES_DIR, stim, variant)
+            bp = B.find_bundle(stim, variant)
             if not bp.exists():
                 continue
             cache.clear()  # bound memory: one bundle at a time is enough (sorted order)

@@ -52,7 +52,7 @@ def main():
     args = ap.parse_args()
 
     arrays, meta = bundles.load_bundle(
-        bundles.bundle_path(cfg.BUNDLES_DIR, args.stim_id, args.variant))
+        bundles.find_bundle(args.stim_id, args.variant))
     rdir = worklist.result_dir(cfg.RESULTS_DIR / "windows", args.config,
                                args.variant, args.stim_id)
     res = json.loads((rdir / "results.json").read_text())

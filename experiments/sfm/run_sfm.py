@@ -158,7 +158,7 @@ def main():
             if worklist.is_done(args.out_root, out_name, variant, sid):
                 skipped += 1
                 continue
-            bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, variant)
+            bpath = bundles.find_bundle(sid, variant)
             if not bpath.exists():
                 print(f"MISSING bundle {bpath} — skipping", flush=True)
                 continue
@@ -220,7 +220,7 @@ def main():
             if mem.handoff in ("static_bi", "static_pred"):
                 inits = {}
                 for sv in segs:
-                    bp = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
+                    bp = bundles.find_bundle(sid, sv)
                     if bp.exists():
                         a, _ = bundles.load_bundle(bp)
                         inits[sv] = float(np.asarray(a["motion_valid"])[0].mean())
@@ -232,7 +232,7 @@ def main():
             carry = None
             src_trusted = False   # has the carried grouping ever seen real motion?
             for sv in order:
-                bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, sv)
+                bpath = bundles.find_bundle(sid, sv)
                 if not bpath.exists():
                     print(f"MISSING bundle {bpath} — skipping video {sid}", flush=True)
                     carry = None
@@ -308,7 +308,7 @@ def main():
         if worklist.is_done(args.out_root, out_name, variant, sid):
             skipped += 1
             continue
-        bpath = bundles.bundle_path(cfg.BUNDLES_DIR, sid, variant)
+        bpath = bundles.find_bundle(sid, variant)
         if not bpath.exists():
             print(f"MISSING bundle {bpath} — skipping", flush=True)
             continue

@@ -165,7 +165,7 @@ def process_video(stim_id, variants, vda, raft, model_cfg, device, batch_size,
 
     for variant in variants:
         out = bundles.bundle_path(cfg.BUNDLES_DIR, stim_id, variant)
-        if out.exists():
+        if bundles.find_bundle(stim_id, variant).exists():  # incl. release archive
             continue
         fidx = list(W.window_frames(variant))                        # video frames 0..23
         depth_win, factor, med = convert_depth(inv_depth[fidx])      # (F, 1024, 1024)
@@ -269,7 +269,7 @@ def main():
 
     t0, done, skipped = time.time(), 0, 0
     for n, sid in enumerate(ids):
-        if all(bundles.bundle_path(cfg.BUNDLES_DIR, sid, v).exists() for v in variants):
+        if all(bundles.find_bundle(sid, v).exists() for v in variants):
             skipped += 1
             continue
         process_video(sid, variants, vda, raft, model_cfg, device, args.batch_size,
